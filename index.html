@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>股票管理系統</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background-color: #111827; color: #e5e7eb; font-family: sans-serif; }
+    .card { background: #1f2937; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem; }
+    button { margin: 0.25rem; }
+    pre { background: #0b0f1a; padding: 0.75rem; border-radius: 0.25rem; max-height: 420px; overflow-y: auto; }
+  </style>
+</head>
+<body class="p-4">
+  <div id="authModal" class="fixed inset-0 flex items-center justify-center bg-black bg-opacity-70">
+    <div class="card w-80">
+      <h2 class="text-xl font-bold mb-2">使用者登入</h2>
+      <input id="authUsername" type="text" placeholder="帳號" class="w-full p-2 mb-2 rounded bg-gray-700" />
+      <input id="authPassword" type="password" placeholder="密碼" class="w-full p-2 mb-2 rounded bg-gray-700" />
+      <div class="flex justify-between">
+        <button id="loginBtn" class="bg-blue-600 px-3 py-1 rounded">登入</button>
+        <button id="registerBtn" class="bg-green-600 px-3 py-1 rounded">註冊</button>
+        <button id="forgotBtn" class="bg-yellow-600 px-3 py-1 rounded">忘記密碼</button>
+      </div>
+      <p id="authStatus" class="mt-2 text-sm text-red-400 hidden"></p>
+    </div>
+  </div>
+
+  <div id="mainContent" class="hidden">
+    <div class="flex justify-between items-center mb-4">
+      <h1 class="text-2xl font-bold">股票管理系統</h1>
+      <div>
+        <span id="welcomeMsg"></span>
+        <button onclick="logout()" class="bg-red-600 px-3 py-1 rounded">登出</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="font-bold mb-2">股票查詢</h2>
+      <input id="stockSymbol" type="text" placeholder="輸入股票代號 (如 2330.TW 或 AAPL)" class="p-2 rounded bg-gray-700 w-full mb-2" />
+      <div>
+        <button onclick="getStockInfo()" class="bg-blue-500 px-3 py-1 rounded">基本資料</button>
+        <button onclick="getStockHistory()" class="bg-blue-500 px-3 py-1 rounded">歷史資料</button>
+        <button onclick="getHighestPrice()" class="bg-blue-500 px-3 py-1 rounded">最高價</button>
+      </div>
+      <pre id="stockResult"></pre>
+    </div>
+
+    <div class="card">
+      <h2 class="font-bold mb-2">依產業查詢</h2>
+      <input id="industryName" type="text" placeholder="輸入產業名稱 (如 Semiconductor)" class="p-2 rounded bg-gray-700 w-full mb-2" />
+      <button onclick="getStocksByIndustry()" class="bg-purple-500 px-3 py-1 rounded">查詢</button>
+      <pre id="industryResult"></pre>
+    </div>
+
+    <div class="card">
+      <h2 class="font-bold mb-2">股票預測</h2>
+      <input id="predictSymbol" type="text" placeholder="輸入股票代號 (如 AMZN/2330)" class="p-2 rounded bg-gray-700 w-full mb-2" />
+      <button onclick="predictPrice()" class="bg-green-500 px-3 py-1 rounded">預測</button>
+      <pre id="predictResult"></pre>
+    </div>
+  </div>
+
+  <script>
+    // 固定使用同主機與同子路徑
+    const BASE = location.origin + location.pathname.replace(/\/index\.html?$/i, '');
+    const AUTH_API = BASE + "/auth.php";
+    const STOCK_API = BASE + "/api.php";
+
+    async function fetchAPI(url, options = {}) {
+      const opts = Object.assign({
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' }
+      }, options);
+      try {
+        const res = await fetch(url, opts);
+        let data = null;
+        try { data = await res.json(); } catch { data = { error: "伺服器回傳非 JSON" }; }
+        if (!res.ok) return data || { error: "請求失敗" };
+        return data;
+      } catch (e) {
+        return { error: "無法連線伺服器" };
+      }
+    }
+
+    async function handleAuth(action) {
+      const username = document.getElementById("authUsername").value.trim();
+      const password = document.getElementById("authPassword").value;
+      const statusDiv = document.getElementById("authStatus");
+      statusDiv.classList.remove("text-green-400"); statusDiv.classList.add("text-red-400");
+      statusDiv.style.display = "none";
+
+      if (action !== "forgot" && (!username || !password)) {
+        statusDiv.innerText = "請輸入帳號和密碼"; statusDiv.style.display = "block"; return;
+      }
+      if (action === "forgot" && !username) {
+        statusDiv.innerText = "請輸入帳號以重設密碼"; statusDiv.style.display = "block"; return;
+      }
+
+      const body = action === "forgot" ? { username } : { username, password };
+      const result = await fetchAPI(`${AUTH_API}?action=${action}`, { method: "POST", body: JSON.stringify(body) });
+
+      if (result.success) {
+        statusDiv.innerText = result.temp_password ? `${result.success} 臨時密碼：${result.temp_password}` : result.success;
+        statusDiv.classList.remove("text-red-400"); statusDiv.classList.add("text-green-400");
+        statusDiv.style.display = "block";
+        if (action === "login") {
+          document.getElementById("authModal").style.display = "none";
+          document.getElementById("mainContent").classList.remove("hidden");
+          document.getElementById("welcomeMsg").innerText = `歡迎，${username}！`;
+        }
+      } else {
+        statusDiv.innerText = result.error || "發生錯誤";
+        statusDiv.style.display = "block";
+      }
+    }
+
+    function logout() {
+      fetchAPI(`${AUTH_API}?action=logout`);
+      document.getElementById("mainContent").classList.add("hidden");
+      document.getElementById("authModal").style.display = "flex";
+      document.getElementById("authUsername").value = "";
+      document.getElementById("authPassword").value = "";
+    }
+
+    document.getElementById("loginBtn").addEventListener("click", () => handleAuth("login"));
+    document.getElementById("registerBtn").addEventListener("click", () => handleAuth("register"));
+    document.getElementById("forgotBtn").addEventListener("click", () => handleAuth("forgot"));
+
+    async function getStockInfo() {
+      const symbol = document.getElementById("stockSymbol").value.trim();
+      document.getElementById("stockResult").innerText = "Loading...";
+      const result = await fetchAPI(`${STOCK_API}?action=info&symbol=${encodeURIComponent(symbol)}`);
+      document.getElementById("stockResult").innerText = JSON.stringify(result, null, 2);
+    }
+    async function getStockHistory() {
+      const symbol = document.getElementById("stockSymbol").value.trim();
+      document.getElementById("stockResult").innerText = "Loading...";
+      const result = await fetchAPI(`${STOCK_API}?action=history&symbol=${encodeURIComponent(symbol)}`);
+      document.getElementById("stockResult").innerText = JSON.stringify(result, null, 2);
+    }
+    async function getHighestPrice() {
+      const symbol = document.getElementById("stockSymbol").value.trim();
+      document.getElementById("stockResult").innerText = "Loading...";
+      const result = await fetchAPI(`${STOCK_API}?action=highest&symbol=${encodeURIComponent(symbol)}`);
+      document.getElementById("stockResult").innerText = JSON.stringify(result, null, 2);
+    }
+    async function getStocksByIndustry() {
+      const industry = document.getElementById("industryName").value.trim();
+      document.getElementById("industryResult").innerText = "Loading...";
+      const result = await fetchAPI(`${STOCK_API}?action=by_industry&industry=${encodeURIComponent(industry)}`);
+      document.getElementById("industryResult").innerText = JSON.stringify(result, null, 2);
+    }
+    async function predictPrice() {
+      const symbol = document.getElementById("predictSymbol").value.trim();
+      document.getElementById("predictResult").innerText = "Loading...";
+      const result = await fetchAPI(`${STOCK_API}?action=predict&symbol=${encodeURIComponent(symbol)}`);
+      document.getElementById("predictResult").innerText = JSON.stringify(result, null, 2);
+    }
+  </script>
+  <button onclick="updateToday()" class="bg-indigo-600 px-3 py-1 rounded">更新到今日</button>
+<script>
+async function updateToday(){
+  const symbol = document.getElementById("stockSymbol").value.trim() || document.getElementById("predictSymbol").value.trim();
+  if(!symbol){ alert('請先輸入股票代號'); return; }
+  const BASE = location.origin + location.pathname.replace(/\/index\.html?$/i, '');
+  const r = await fetch(`${BASE}/api.php?action=update_today&symbol=${encodeURIComponent(symbol)}`, {credentials:'include'});
+  const j = await r.json();
+  alert(JSON.stringify(j, null, 2));
+}
+</script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 
 import argparse, time
 from datetime import date, timedelta, datetime
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 import pandas as pd, requests, yfinance as yf
 from bs4 import BeautifulSoup
 import mysql.connector
@@ -26,7 +26,10 @@ DEFAULT_TRY_SLEEP = 1.2
 FALLBACK_TW = ['2330.TW','2317.TW','2303.TW','2603.TW','2882.TW','2881.TW']
 FALLBACK_SP500 = ['AAPL','MSFT','NVDA','GOOGL','AMZN','META','BRK-B','XOM','LLY','JPM']
 
+UA = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+
 def normalize_us_ticker(t: str) -> str:
+    # BRK.B -> BRK-B, BF.B -> BF-B, 等
     return t.replace('.', '-') if '.' in t else t
 
 def normalize_symbol(raw: str) -> str:
@@ -51,6 +54,7 @@ def ensure_table(conn):
     cur.execute(sql); conn.commit(); cur.close()
 
 def insert_batch(conn, rows: List[Tuple]):
+    if not rows: return
     sql = (
         "INSERT INTO stock_data (symbol,company_name,industry,date,open,high,low,close,volume) "
         "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
@@ -60,11 +64,14 @@ def insert_batch(conn, rows: List[Tuple]):
     cur=conn.cursor(); cur.executemany(sql, rows); conn.commit(); cur.close()
 
 def safe_download(symbol: str, start: str, end: str, tries: int = DEFAULT_TRIES, base_sleep: float = DEFAULT_TRY_SLEEP) -> pd.DataFrame:
+    last_exc = None
     for i in range(1, tries+1):
         try:
             df = yf.download(symbol, start=start, end=end, auto_adjust=False, progress=False, threads=False, interval='1d')
-            if isinstance(df, pd.DataFrame) and not df.empty: return df
-        except Exception: pass
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                return df
+        except Exception as e:
+            last_exc = e
         time.sleep(base_sleep * i)
     return pd.DataFrame()
 
@@ -76,13 +83,23 @@ def expand_years(end_ymd: str, years: int) -> Tuple[str,str]:
         start_d = (pd.Timestamp(end_d) - pd.DateOffset(years=years)).date()
     return start_d.isoformat(), end_ymd
 
-def fetch_one(symbol: str, start: str, end: str, min_rows: int = DEFAULT_MIN_ROWS, tries: int = DEFAULT_TRIES, try_sleep: float = DEFAULT_TRY_SLEEP) -> Optional[pd.DataFrame]:
-    tkr = yf.Ticker(symbol); company_name, industry = 'N/A','N/A'
-    try:
-        info = tkr.info or {}
-        company_name = info.get('longName') or info.get('shortName') or company_name
-        industry = info.get('industry') or industry
-    except Exception: pass
+def fetch_one(symbol: str, start: str, end: str, meta_hint: Optional[Dict[str,str]]=None,
+              min_rows: int = DEFAULT_MIN_ROWS, tries: int = DEFAULT_TRIES, try_sleep: float = DEFAULT_TRY_SLEEP) -> Optional[pd.DataFrame]:
+    """
+    下載一檔並回傳整理好的 DataFrame（帶上公司名/產業，優先用 meta_hint，再用 yfinance.info）
+    """
+    tkr = yf.Ticker(symbol)
+    company_name = (meta_hint or {}).get('name', 'N/A')
+    industry     = (meta_hint or {}).get('industry', 'N/A')
+    if company_name == 'N/A' or industry == 'N/A':
+        try:
+            info = tkr.info or {}
+            if company_name == 'N/A':
+                company_name = info.get('longName') or info.get('shortName') or company_name
+            if industry == 'N/A':
+                industry = info.get('industry') or industry
+        except Exception:
+            pass
 
     df = safe_download(symbol, start, end, tries=tries, base_sleep=try_sleep)
     if df.empty or len(df) < min_rows:
@@ -91,40 +108,65 @@ def fetch_one(symbol: str, start: str, end: str, min_rows: int = DEFAULT_MIN_ROW
         s7,_ = expand_years(end, 7); df = safe_download(symbol, s7, end, tries=tries, base_sleep=try_sleep)
     if df.empty: return None
 
-    df = df.reset_index().rename(columns={'Date':'date','Open':'open','High':'high','Low':'low','Close':'close','Adj Close':'adj_close','Volume':'volume'})
-    if 'adj_close' in df.columns: df['close'] = df['adj_close'].where(df['adj_close'].notna(), df['close'])
-    df['symbol']=symbol; df['company_name']=company_name; df['industry']=industry
+    df = df.reset_index().rename(columns={
+        'Date':'date','Open':'open','High':'high','Low':'low','Close':'close','Adj Close':'adj_close','Volume':'volume'
+    })
+    if 'adj_close' in df.columns:
+        df['close'] = df['adj_close'].where(df['adj_close'].notna(), df['close'])
+    # 補齊欄位避免 None/NaN 傳染
+    for col in ['open','high','low','close','volume']:
+        if col not in df.columns: df[col] = None
+
+    df['symbol']=symbol; df['company_name']=company_name or 'N/A'; df['industry']=industry or 'N/A'
     df = df[['symbol','company_name','industry','date','open','high','low','close','volume']].where(pd.notnull(df), None)
     return df
 
-def get_tw_tickers() -> List[str]:
+def get_tw_list() -> List[Dict[str,str]]:
+    """
+    從 TWSE ISIN 頁面抓：代碼、公司名、產業
+    欄位：0=代碼＋名稱（中間全形空格）、4=產業別
+    """
     url='https://isin.twse.com.tw/isin/C_public.jsp?strMode=2'
+    out=[]
     try:
-        r=requests.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=25); r.encoding='big5'
-        soup=BeautifulSoup(r.text,'html.parser'); out=[]
+        r=requests.get(url, headers=UA, timeout=25); r.encoding='big5'
+        soup=BeautifulSoup(r.text,'html.parser')
         for tr in soup.find_all('tr')[2:]:
             tds=tr.find_all('td')
-            if len(tds)>1:
-                raw=tds[0].get_text(strip=True); code=raw.split('　')[0].strip()
-                if code.isdigit() and len(code)==4: out.append(f'{code}.TW')
-        if out: return out
-    except Exception: pass
-    return FALLBACK_TW.copy()
+            if len(tds) > 5:
+                raw=tds[0].get_text(strip=True)
+                parts = raw.split('　')  # 全形空格
+                code = parts[0].strip() if parts else ''
+                name = parts[1].strip() if len(parts)>=2 else ''
+                industry = tds[4].get_text(strip=True)
+                if code.isdigit() and len(code)==4:
+                    out.append({'symbol': f'{code}.TW', 'name': name, 'industry': industry})
+    except Exception:
+        # 失敗則只回退代碼清單（無名稱/產業）
+        return [{'symbol': s, 'name': 'N/A', 'industry': 'N/A'} for s in FALLBACK_TW]
+    return out if out else [{'symbol': s, 'name': 'N/A', 'industry': 'N/A'} for s in FALLBACK_TW]
 
-def get_sp500_tickers() -> List[str]:
+def get_sp500_list() -> List[Dict[str,str]]:
+    """
+    從 Wikipedia S&P 500 表抓：代號、公司名、GICS 子產業
+    """
     url='https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+    out=[]
     try:
-        r=requests.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=25); r.raise_for_status()
-        soup=BeautifulSoup(r.text,'html.parser'); table=soup.find('table',{'id':'constituents'})
-        if table:
-            out=[]
-            for tr in table.find_all('tr')[1:]:
-                td0=tr.find_all('td')[0]
-                if not td0: continue
-                sym=td0.get_text(strip=True); out.append(normalize_us_ticker(sym))
-            if out: return out
-    except Exception: pass
-    return FALLBACK_SP500.copy()
+        r=requests.get(url, headers=UA, timeout=25); r.raise_for_status()
+        soup=BeautifulSoup(r.text,'html.parser')
+        table=soup.find('table',{'id':'constituents'})
+        if not table: raise RuntimeError('no table')
+        for tr in table.find_all('tr')[1:]:
+            tds = tr.find_all('td')
+            if len(tds) < 5: continue
+            sym = tds[0].get_text(strip=True)
+            security = tds[1].get_text(strip=True)
+            sub_industry = tds[4].get_text(strip=True)  # GICS Sub-Industry
+            out.append({'symbol': normalize_us_ticker(sym), 'name': security, 'industry': sub_industry})
+    except Exception:
+        return [{'symbol': s, 'name': 'N/A', 'industry': 'N/A'} for s in FALLBACK_SP500]
+    return out if out else [{'symbol': s, 'name': 'N/A', 'industry': 'N/A'} for s in FALLBACK_SP500]
 
 def main():
     p=argparse.ArgumentParser(description='Daily-updating stock scraper')
@@ -137,17 +179,22 @@ def main():
     p.add_argument('--try-sleep', type=float, default=DEFAULT_TRY_SLEEP)
     args=p.parse_args()
 
-    tw = get_tw_tickers(); sp = get_sp500_tickers(); symbols = tw + sp
+    tw_list = get_tw_list()
+    sp_list = get_sp500_list()
+    symbols = tw_list + sp_list
     if not symbols:
         print('無可用代碼'); return
 
     conn=connect_db(); ensure_table(conn)
     buf=[]; ok=fail=0; total=len(symbols)
-    for idx,raw in enumerate(symbols, start=1):
+    for idx,item in enumerate(symbols, start=1):
+        raw=item['symbol']; meta={'name': item.get('name','N/A'), 'industry': item.get('industry','N/A')}
         sym=normalize_symbol(raw); print(f"[{idx}/{total}] 下載 {sym} ...")
         try:
-            df=fetch_one(sym, args.start, args.end, min_rows=args.min_rows, tries=args.tries, try_sleep=args.try_sleep)
-            if df is None or df.empty: print("  -> 無資料"); fail+=1
+            df=fetch_one(sym, args.start, args.end, meta_hint=meta,
+                         min_rows=args.min_rows, tries=args.tries, try_sleep=args.try_sleep)
+            if df is None or df.empty:
+                print("  -> 無資料"); fail+=1
             else:
                 rows=[tuple(r) for r in df.itertuples(index=False, name=None)]
                 buf.extend(rows); ok+=1

@@ -98,7 +98,7 @@ def main():
                         target = head+'.TW'
                     write_db(conn, target, df, name, ind)
                     print(json.dumps({'success':True,'written_symbol':target,'rows':int(len(df)),'from':sym,'mode':mode}, ensure_ascii=False))
-                    return
+                    return 
         print(json.dumps({'error':'backfill_failed','tried':tried}, ensure_ascii=False))
     except Exception as e:
         print(json.dumps({'error':str(e)}, ensure_ascii=False))

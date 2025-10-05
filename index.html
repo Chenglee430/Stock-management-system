@@ -1,174 +1,720 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>股票管理系統</title>
+  <meta charset="utf-8"/>
+  <title>股票工具 Pro</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <style>
-    body { background-color: #111827; color: #e5e7eb; font-family: sans-serif; }
-    .card { background: #1f2937; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem; }
-    button { margin: 0.25rem; }
-    pre { background: #0b0f1a; padding: 0.75rem; border-radius: 0.25rem; max-height: 420px; overflow-y: auto; }
+    :root{ color-scheme: light dark; }
+    body{ font-family: system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans TC",sans-serif; }
+    .mask{ background: rgba(0,0,0,.90); }
+    .hide{ display:none!important; visibility:hidden!important; opacity:0!important; pointer-events:none!important; }
+    /* ---- 圖表 ---- */
+    #kchart{ height: 640px; }
+    .plot-wrap{ position: relative; }
+    input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
+
+    /* 讓重設視窗一定蓋住登入視窗 */
+    #loginMask { z-index: 50; }
+    #fpMask    { z-index: 60; }
   </style>
 </head>
-<body class="p-4">
-  <div id="authModal" class="fixed inset-0 flex items-center justify-center bg-black bg-opacity-70">
-    <div class="card w-80">
-      <h2 class="text-xl font-bold mb-2">使用者登入</h2>
-      <input id="authUsername" type="text" placeholder="帳號" class="w-full p-2 mb-2 rounded bg-gray-700" />
-      <input id="authPassword" type="password" placeholder="密碼" class="w-full p-2 mb-2 rounded bg-gray-700" />
-      <div class="flex justify-between">
-        <button id="loginBtn" class="bg-blue-600 px-3 py-1 rounded">登入</button>
-        <button id="registerBtn" class="bg-green-600 px-3 py-1 rounded">註冊</button>
-        <button id="forgotBtn" class="bg-yellow-600 px-3 py-1 rounded">忘記密碼</button>
+<body class="bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
+<header class="sticky top-0 z-10 backdrop-blur bg-white/70 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-800">
+  <div class="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
+    <div class="text-lg font-semibold">📈 股票工具 Pro</div>
+    <div class="flex-1"></div>
+    <button id="btnTheme" class="px-3 py-1.5 rounded-md text-sm border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">深/淺色</button>
+    <div id="userArea" class="text-sm opacity-80"></div>
+    <button id="btnLogout" class="px-3 py-1.5 rounded-md text-sm border border-rose-300 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30">登出</button>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-4 py-4 space-y-4">
+
+  <!-- 搜尋列 -->
+  <section class="grid grid-cols-1 md:grid-cols-12 gap-3">
+    <div class="md:col-span-6 flex items-center gap-2">
+      <input id="inpSymbol" list="symList" class="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+             placeholder="輸入代號或公司（例：2330 或 AAPL）"/>
+      <datalist id="symList"></datalist>
+      <button id="btnGo" class="px-3 py-2 rounded-md bg-slate-900 text-white dark:bg-white dark:text-slate-900">載入</button>
+    </div>
+    <div class="md:col-span-6 grid grid-cols-2 md:grid-cols-4 gap-2">
+      <button id="btnQuote"  class="px-3 py-2 border rounded-md hover:bg-slate-100 dark:hover:bg-slate-800">即時報價</button>
+      <button id="btnInfo"   class="px-3 py-2 border rounded-md hover:bg-slate-100 dark:hover:bg-slate-800">公司基本資料</button>
+      <button id="btnUpdate" class="px-3 py-2 border rounded-md hover:bg-slate-100 dark:hover:bg-slate-800">更新到最新日K</button>
+      <button id="btnPredict" class="px-3 py-2 border rounded-md hover:bg-slate-100 dark:hover:bg-slate-800">預測</button>
+      <button id="btnPredictTarget" class="px-3 py-2 border rounded-md hover:bg-slate-100 dark:hover:bg-slate-800">目標價</button>
+    </div>
+  </section>
+
+  <!-- 報價 / 公司資料 / 預測 -->
+  <section class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <!-- 即時報價 -->
+    <div class="border rounded-xl p-4 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+      <div class="font-semibold mb-2">即時報價</div>
+      <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+        <div>最新價：<span id="qPrice">—</span></div>
+        <div>漲跌幅：<span id="qPct">—</span></div>
+        <div>成交量：<span id="qVol">—</span></div>
+        <div>時間：<span id="qTime">—</span></div>
       </div>
-      <p id="authStatus" class="mt-2 text-sm text-red-400 hidden"></p>
+      <hr class="my-2 border-slate-200 dark:border-slate-700"/>
+      <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+        <div>昨收：<span id="qPrev">—</span></div>
+        <div>開盤：<span id="qOpen">—</span></div>
+        <div>最高：<span id="qHigh">—</span></div>
+        <div>最低：<span id="qLow">—</span></div>
+      </div>
+      <div id="qNote" class="text-xs opacity-70 mt-2"></div>
+    </div>
+
+    <!-- 公司基本資料 -->
+    <div class="border rounded-xl p-4 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+      <div class="font-semibold mb-2">公司基本資料</div>
+      <div class="grid grid-cols-2 gap-2 text-sm">
+        <div>名稱：<span id="iName">—</span></div>
+        <div>產業：<span id="iIndustry">—</span></div>
+        <div>市值：<span id="iMktcap">—</span></div>
+        <div>PE：<span id="iPE">—</span></div>
+        <div>殖利率：<span id="iDY">—</span></div>
+      </div>
+    </div>
+
+    <!-- 預測結果 -->
+    <div class="border rounded-xl p-4 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+      <div class="font-semibold mb-2">預測結果</div>
+      <div class="text-sm space-y-1" id="predBox">
+        <div>方法：<span id="pMethod">—</span></div>
+        <div>上次收盤：<span id="pLast">—</span></div>
+        <div>明日預測：<span id="pNext">—</span></div>
+        <hr class="my-2 border-slate-200 dark:border-slate-700"/>
+        <div>（目標）方法：<span id="pMethodTarget">—</span></div>
+        <div>（目標）視窗：<span id="pHorizon">—</span></div>
+        <div>（目標）技術面：<span id="pTech">—</span></div>
+        <div>（目標）估值面：<span id="pVal">—</span></div>
+        <div>（目標）建議目標價：<span id="pSuggest">—</span></div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- K 線 -->
+  <section class="border rounded-xl p-3 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+    <div class="flex flex-wrap items-center gap-2">
+      <div class="font-semibold mr-2">K 線</div>
+      <div class="flex items-center gap-1">
+        <button data-tf="D"  class="btn-tf px-3 py-1.5 rounded-md border">日K</button>
+        <button data-tf="W"  class="btn-tf px-3 py-1.5 rounded-md border">週K</button>
+        <button data-tf="M"  class="btn-tf px-3 py-1.5 rounded-md border">月K</button>
+      </div>
+      <div class="flex items-center gap-1 ml-3">
+        <button data-range="3M"  class="btn-range px-2.5 py-1.5 rounded-md border text-sm">3M</button>
+        <button data-range="6M"  class="btn-range px-2.5 py-1.5 rounded-md border text-sm">6M</button>
+        <button data-range="1Y"  class="btn-range px-2.5 py-1.5 rounded-md border text-sm">1Y</button>
+        <button data-range="2Y"  class="btn-range px-2.5 py-1.5 rounded-md border text-sm">2Y</button>
+        <button data-range="MAX" class="btn-range px-2.5 py-1.5 rounded-md border text-sm">MAX</button>
+      </div>
+      <div class="flex items-center gap-3 ml-3 text-sm select-none">
+        <label class="inline-flex items-center gap-1"><input id="chkMA"   type="checkbox" class="accent-slate-900 dark:accent-white" checked>MA</label>
+        <label class="inline-flex items-center gap-1"><input id="chkEMA"  type="checkbox" class="accent-slate-900 dark:accent-white">EMA</label>
+        <label class="inline-flex items-center gap-1"><input id="chkBOLL" type="checkbox" class="accent-slate-900 dark:accent-white">布林</label>
+        <label class="inline-flex items-center gap-1"><input id="chkRSI"  type="checkbox" class="accent-slate-900 dark:accent-white" checked>RSI</label>
+        <label class="inline-flex items-center gap-1"><input id="chkMACD" type="checkbox" class="accent-slate-900 dark:accent-white" checked>MACD</label>
+      </div>
+    </div>
+    <div class="plot-wrap">
+      <div id="kchart" class="w-full mt-3"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- 登入 -->
+<div id="loginMask" class="fixed inset-0 mask flex items-center justify-center px-4 hide">
+  <div class="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 p-5 shadow-xl border border-slate-200 dark:border-slate-700">
+    <div class="text-lg font-semibold mb-3">請先登入</div>
+    <div class="space-y-2">
+      <input id="lgEmail" type="email" class="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Email"/>
+      <input id="lgPass"  type="password" inputmode="numeric" pattern="\d{6}" maxlength="6"
+             class="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+             placeholder="6位數字密碼"/>
+    </div>
+    <div id="lgMsg" class="text-sm text-rose-600 mt-2 min-h-5"></div>
+    <div class="mt-3 flex justify-between">
+      <div class="flex gap-2">
+        <button id="btnDoLogin" class="px-3 py-2 rounded-md bg-slate-900 text-white dark:bg-white dark:text-slate-900">登入</button>
+        <button id="btnDoRegister" class="px-3 py-2 rounded-md border">註冊</button>
+      </div>
+      <div class="flex gap-2">
+        <button id="btnForgot" class="px-3 py-2 rounded-md border">忘記密碼</button>
+      </div>
     </div>
   </div>
+</div>
 
-  <div id="mainContent" class="hidden">
-    <div class="flex justify-between items-center mb-4">
-      <h1 class="text-2xl font-bold">股票管理系統</h1>
-      <div>
-        <span id="welcomeMsg"></span>
-        <button onclick="logout()" class="bg-red-600 px-3 py-1 rounded">登出</button>
+<!-- 忘記／重設密碼視窗 -->
+<div id="fpMask" class="fixed inset-0 mask flex items-center justify-center px-4 hide">
+  <div class="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 p-5 shadow-xl border border-slate-200 dark:border-slate-700">
+    <div class="text-lg font-semibold mb-3">重設密碼</div>
+    <div class="space-y-2">
+      <input id="fpEmail" type="email" class="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Email（先輸入帳號）"/>
+      <div class="flex gap-2">
+        <input id="fpCode" type="text" inputmode="numeric" maxlength="4" class="flex-1 px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+               placeholder="4 位驗證碼"/>
+        <button id="btnSendCode" class="px-3 py-2 rounded-md border">取得驗證碼</button>
       </div>
+      <input id="fpNew" type="password" inputmode="numeric" maxlength="6" class="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+             placeholder="新密碼（6位數字）"/>
     </div>
-
-    <div class="card">
-      <h2 class="font-bold mb-2">股票查詢</h2>
-      <input id="stockSymbol" type="text" placeholder="輸入股票代號 (如 2330.TW 或 AAPL)" class="p-2 rounded bg-gray-700 w-full mb-2" />
-      <div>
-        <button onclick="getStockInfo()" class="bg-blue-500 px-3 py-1 rounded">基本資料</button>
-        <button onclick="getStockHistory()" class="bg-blue-500 px-3 py-1 rounded">歷史資料</button>
-        <button onclick="getHighestPrice()" class="bg-blue-500 px-3 py-1 rounded">最高價</button>
-      </div>
-      <pre id="stockResult"></pre>
-    </div>
-
-    <div class="card">
-      <h2 class="font-bold mb-2">依產業查詢</h2>
-      <input id="industryName" type="text" placeholder="輸入產業名稱 (如 Semiconductor)" class="p-2 rounded bg-gray-700 w-full mb-2" />
-      <button onclick="getStocksByIndustry()" class="bg-purple-500 px-3 py-1 rounded">查詢</button>
-      <pre id="industryResult"></pre>
-    </div>
-
-    <div class="card">
-      <h2 class="font-bold mb-2">股票預測</h2>
-      <input id="predictSymbol" type="text" placeholder="輸入股票代號 (如 AMZN/2330)" class="p-2 rounded bg-gray-700 w-full mb-2" />
-      <button onclick="predictPrice()" class="bg-green-500 px-3 py-1 rounded">預測</button>
-      <pre id="predictResult"></pre>
+    <div id="fpMsg" class="text-sm mt-2 min-h-5"></div>
+    <div class="mt-3 flex justify-between">
+      <button id="btnDoReset" class="px-3 py-2 rounded-md bg-slate-900 text-white dark:bg-white dark:text-slate-900">確認重設</button>
+      <button id="btnFPClose" class="px-3 py-2 rounded-md border">關閉</button>
     </div>
   </div>
+</div>
 
-  <script>
-    // 固定使用同主機與同子路徑
-    const BASE = location.origin + location.pathname.replace(/\/index\.html?$/i, '');
-    const AUTH_API = BASE + "/auth.php";
-    const STOCK_API = BASE + "/api.php";
-
-    async function fetchAPI(url, options = {}) {
-      const opts = Object.assign({
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' }
-      }, options);
-      try {
-        const res = await fetch(url, opts);
-        let data = null;
-        try { data = await res.json(); } catch { data = { error: "伺服器回傳非 JSON" }; }
-        if (!res.ok) return data || { error: "請求失敗" };
-        return data;
-      } catch (e) {
-        return { error: "無法連線伺服器" };
-      }
-    }
-
-    async function handleAuth(action) {
-      const username = document.getElementById("authUsername").value.trim();
-      const password = document.getElementById("authPassword").value;
-      const statusDiv = document.getElementById("authStatus");
-      statusDiv.classList.remove("text-green-400"); statusDiv.classList.add("text-red-400");
-      statusDiv.style.display = "none";
-
-      if (action !== "forgot" && (!username || !password)) {
-        statusDiv.innerText = "請輸入帳號和密碼"; statusDiv.style.display = "block"; return;
-      }
-      if (action === "forgot" && !username) {
-        statusDiv.innerText = "請輸入帳號以重設密碼"; statusDiv.style.display = "block"; return;
-      }
-
-      const body = action === "forgot" ? { username } : { username, password };
-      const result = await fetchAPI(`${AUTH_API}?action=${action}`, { method: "POST", body: JSON.stringify(body) });
-
-      if (result.success) {
-        statusDiv.innerText = result.temp_password ? `${result.success} 臨時密碼：${result.temp_password}` : result.success;
-        statusDiv.classList.remove("text-red-400"); statusDiv.classList.add("text-green-400");
-        statusDiv.style.display = "block";
-        if (action === "login") {
-          document.getElementById("authModal").style.display = "none";
-          document.getElementById("mainContent").classList.remove("hidden");
-          document.getElementById("welcomeMsg").innerText = `歡迎，${username}！`;
-        }
-      } else {
-        statusDiv.innerText = result.error || "發生錯誤";
-        statusDiv.style.display = "block";
-      }
-    }
-
-    function logout() {
-      fetchAPI(`${AUTH_API}?action=logout`);
-      document.getElementById("mainContent").classList.add("hidden");
-      document.getElementById("authModal").style.display = "flex";
-      document.getElementById("authUsername").value = "";
-      document.getElementById("authPassword").value = "";
-    }
-
-    document.getElementById("loginBtn").addEventListener("click", () => handleAuth("login"));
-    document.getElementById("registerBtn").addEventListener("click", () => handleAuth("register"));
-    document.getElementById("forgotBtn").addEventListener("click", () => handleAuth("forgot"));
-
-    async function getStockInfo() {
-      const symbol = document.getElementById("stockSymbol").value.trim();
-      document.getElementById("stockResult").innerText = "Loading...";
-      const result = await fetchAPI(`${STOCK_API}?action=info&symbol=${encodeURIComponent(symbol)}`);
-      document.getElementById("stockResult").innerText = JSON.stringify(result, null, 2);
-    }
-    async function getStockHistory() {
-      const symbol = document.getElementById("stockSymbol").value.trim();
-      document.getElementById("stockResult").innerText = "Loading...";
-      const result = await fetchAPI(`${STOCK_API}?action=history&symbol=${encodeURIComponent(symbol)}`);
-      document.getElementById("stockResult").innerText = JSON.stringify(result, null, 2);
-    }
-    async function getHighestPrice() {
-      const symbol = document.getElementById("stockSymbol").value.trim();
-      document.getElementById("stockResult").innerText = "Loading...";
-      const result = await fetchAPI(`${STOCK_API}?action=highest&symbol=${encodeURIComponent(symbol)}`);
-      document.getElementById("stockResult").innerText = JSON.stringify(result, null, 2);
-    }
-    async function getStocksByIndustry() {
-      const industry = document.getElementById("industryName").value.trim();
-      document.getElementById("industryResult").innerText = "Loading...";
-      const result = await fetchAPI(`${STOCK_API}?action=by_industry&industry=${encodeURIComponent(industry)}`);
-      document.getElementById("industryResult").innerText = JSON.stringify(result, null, 2);
-    }
-    async function predictPrice() {
-      const symbol = document.getElementById("predictSymbol").value.trim();
-      document.getElementById("predictResult").innerText = "Loading...";
-      const result = await fetchAPI(`${STOCK_API}?action=predict&symbol=${encodeURIComponent(symbol)}`);
-      document.getElementById("predictResult").innerText = JSON.stringify(result, null, 2);
-    }
-  </script>
-  <button onclick="updateToday()" class="bg-indigo-600 px-3 py-1 rounded">更新到今日</button>
 <script>
-async function updateToday(){
-  const symbol = document.getElementById("stockSymbol").value.trim() || document.getElementById("predictSymbol").value.trim();
-  if(!symbol){ alert('請先輸入股票代號'); return; }
-  const BASE = location.origin + location.pathname.replace(/\/index\.html?$/i, '');
-  const r = await fetch(`${BASE}/api.php?action=update_today&symbol=${encodeURIComponent(symbol)}`, {credentials:'include'});
-  const j = await r.json();
-  alert(JSON.stringify(j, null, 2));
+/* ========= 基本設定 ========= */
+const BASE = location.pathname.replace(/\/[^\/]*$/, '/'); // 此檔所在資料夾
+const API  = BASE + 'api.php';
+const AUTH = BASE + 'auth.php';
+const RESET= BASE + 'auth.php';
+const $ = id => document.getElementById(id);
+const fmtNum = (n, d=2) => (n==null || isNaN(n)) ? '—' : Number(n).toLocaleString(undefined, {maximumFractionDigits:d});
+const fmtPct = n => (n==null || isNaN(n)) ? '—' : ((n>0?'+':'') + Number(n).toFixed(2) + '%');
+const cls = (el, on, c) => el.classList[on?'add':'remove'](c);
+const isDark = () => document.documentElement.classList.contains('dark');
+
+/* 智能時間：支援秒/毫秒/ISO/純日期 */
+function toLocalTime(t){
+  if (t==null || t==='') return '—';
+  if (typeof t === 'number'){
+    const ms = t > 1e12 ? t : (t < 1e11 ? t*1000 : t);
+    return new Date(ms).toLocaleString();
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  const x = Number(t);
+  if (!Number.isNaN(x)){
+    const ms = x > 1e12 ? x : (x < 1e11 ? x*1000 : x);
+    return new Date(ms).toLocaleString();
+  }
+  const d = new Date(t);
+  return isNaN(d) ? String(t) : d.toLocaleString();
 }
+
+/* ========= 狀態 ========= */
+let currentSymbol = '';
+let currentRows   = [];
+let currentTF     = 'D';
+let rangeSel      = '6M';
+let quoteCache    = {};
+
+/* ========= 主流程 ========= */
+document.addEventListener('DOMContentLoaded', () => {
+  const theme = localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light');
+  setTheme(theme);
+  $('btnTheme').onclick = () => setTheme(isDark() ? 'light' : 'dark');
+
+  $('btnLogout').onclick = async () => { try{ await fetch(AUTH+'?action=logout', {credentials:'include'}); }catch{} showLogin(true); };
+
+  $('btnGo').onclick = () => { setSymbolFromInput(); };
+  $('inpSymbol').addEventListener('keydown', e => { if(e.key==='Enter'){ setSymbolFromInput(); } });
+  $('inpSymbol').addEventListener('input', debounce(searchSuggest, 200));
+
+  $('btnQuote').onclick   = () => refreshQuote().catch(console.error);
+  $('btnInfo').onclick    = () => loadInfo().catch(console.error);
+  $('btnUpdate').onclick  = () => updateToday().catch(console.error);
+  $('btnPredict').onclick = () => doPredict().catch(console.error);
+  $('btnPredictTarget').onclick = () => doPredictTarget().catch(console.error);
+
+
+  document.querySelectorAll('.btn-tf').forEach(b=> b.onclick = ()=>{ currentTF=b.dataset.tf; drawK(); updateTFUI(); });
+  document.querySelectorAll('.btn-range').forEach(b=> b.onclick = ()=>{ rangeSel=b.dataset.range; drawK(); updateRangeUI(); });
+  ['chkMA','chkEMA','chkBOLL','chkRSI','chkMACD'].forEach(id => $(id).onchange = () => drawK());
+
+  ensureLogin();
+
+  const last = localStorage.getItem('lastSymbol');
+  if (last){ $('inpSymbol').value = last; setSymbolFromInput(); }
+});
+
+/* ========= 登入遮罩顯示/隱藏 ========= */
+function showLogin(on){
+  cls($('loginMask'), !on, 'hide'); // on=true 顯示, on=false 關閉
+  $('lgMsg').textContent = '';
+}
+async function ensureLogin(){
+  try{
+    const r = await fetch(AUTH+'?action=whoami', {credentials:'include'});
+    const d = await r.json();
+    if(d && d.user){ $('userArea').textContent = d.user.username; showLogin(false); }
+    else{ showLogin(true); }
+  }catch{ showLogin(true); }
+}
+
+/* ========= 登入 ========= */
+$('btnDoLogin').onclick = async ()=>{
+  try{
+    const email = $('lgEmail').value.trim();
+    const pass  = $('lgPass').value.trim();
+    if(!email || !/^\d{6}$/.test(pass)){ $('lgMsg').textContent = '請輸入 Email 與 6 位數字密碼'; return; }
+
+    const r = await fetch(AUTH+'?action=login',{
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      credentials:'include',
+      body: new URLSearchParams({ username: email, password: pass })
+    });
+    const d = await r.json();
+    if(d.ok){
+      $('userArea').textContent = (d.user && d.user.username) ? d.user.username : email;
+      showLogin(false); // 無須重整
+    }else{
+      $('lgMsg').textContent = d.error || '登入失敗';
+    }
+  }catch(e){ $('lgMsg').textContent = '登入錯誤：' + String(e?.message||e); }
+};
+
+/* ========= 註冊 ========= */
+$('btnDoRegister').onclick = async ()=>{
+  try{
+    const email = $('lgEmail').value.trim();
+    const pass  = $('lgPass').value.trim();
+    if(!email || !/^\d{6}$/.test(pass)){ $('lgMsg').textContent = '密碼需為 6 位數字'; return; }
+
+    const r = await fetch(AUTH+'?action=register',{
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      credentials:'include',
+      body: new URLSearchParams({ username: email, password: pass })
+    });
+    const d = await r.json();
+    $('lgMsg').textContent = d.ok ? '註冊成功，請按登入' : (d.error || '註冊失敗');
+  }catch(e){ $('lgMsg').textContent = '註冊錯誤：' + String(e?.message||e); }
+};
+
+/* === 忘記／重設密碼（4 碼） === */
+$('btnForgot').onclick = () => {
+  $('fpEmail').value = $('lgEmail').value.trim();
+  $('fpCode').value  = '';
+  $('fpNew').value   = '';
+  $('fpMsg').textContent = '';
+  $('fpMsg').classList.remove('text-rose-600','text-emerald-600');
+  cls($('fpMask'), false, 'hide');   // 顯示重設視窗
+  cls($('loginMask'), true, 'hide'); // 關閉登入視窗，避免遮住
+};
+$('btnFPClose').onclick = () => {
+  cls($('fpMask'), true, 'hide');
+  cls($('loginMask'), false, 'hide');
+};
+$('btnSendCode').onclick = async ()=>{
+  const email = $('fpEmail').value.trim();
+  if(!email){ $('fpMsg').textContent = '請先輸入 Email'; $('fpMsg').classList.add('text-rose-600'); return; }
+  try{
+    const r = await fetch(RESET, {
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      credentials:'include',
+      body: new URLSearchParams({ action:'forgot_password', email })
+    });
+    const d = await r.json();
+    if(d.ok){
+      $('fpMsg').classList.remove('text-rose-600'); $('fpMsg').classList.add('text-emerald-600');
+      $('fpMsg').textContent = '驗證碼（測試）：' + d.code;
+    }else{
+      $('fpMsg').classList.remove('text-emerald-600'); $('fpMsg').classList.add('text-rose-600');
+      $('fpMsg').textContent = d.error || '送出失敗';
+    }
+  }catch(e){
+    $('fpMsg').classList.add('text-rose-600');
+    $('fpMsg').textContent = '錯誤：' + String(e?.message||e);
+  }
+};
+$('btnDoReset').onclick = async ()=>{
+  const email = $('fpEmail').value.trim();
+  const code  = $('fpCode').value.trim();
+  const newp  = $('fpNew').value.trim();
+  if(!email || !/^\d{4}$/.test(code) || !/^\d{6}$/.test(newp)){
+    $('fpMsg').classList.add('text-rose-600');
+    $('fpMsg').textContent = '請輸入 Email、4 位驗證碼、6 位數字新密碼';
+    return;
+  }
+  try{
+    const r = await fetch(RESET, {
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      credentials:'include',
+      body: new URLSearchParams({ action:'reset_password', email, code, new_password:newp })
+    });
+    const d = await r.json();
+    if(d.ok){
+      $('fpMsg').classList.remove('text-rose-600'); $('fpMsg').classList.add('text-emerald-600');
+      $('fpMsg').textContent = '密碼已更新，將返回登入…';
+      setTimeout(() => {
+        cls($('fpMask'), true, 'hide');
+        cls($('loginMask'), false, 'hide');
+      }, 1200);
+    }else{
+      $('fpMsg').classList.remove('text-emerald-600'); $('fpMsg').classList.add('text-rose-600');
+      $('fpMsg').textContent = d.error || '重設失敗';
+    }
+  }catch(e){
+    $('fpMsg').classList.add('text-rose-600');
+    $('fpMsg').textContent = '錯誤：' + String(e?.message||e);
+  }
+};
+
+/* ========= 搜尋 / 報價 / 歷史 / 指標 / 畫圖 ========= */
+function normalizeSymbolFront(s){
+  let x = (s||'').toUpperCase().trim();
+  if(/^\d{4}([\-\.]?TWO?)?$/.test(x)) return x.replace(/[^0-9]/g,'') + '.TW';
+  if(x.endsWith('-TW'))  x = x.replace('-TW','.TW');
+  if(x.endsWith('-TWO')) x = x.replace('-TWO','.TWO');
+  return x;
+}
+function setSymbolFromInput(){
+  const s = $('inpSymbol').value.trim();
+  if(!s) return;
+  currentSymbol = normalizeSymbolFront(s);
+  $('inpSymbol').value = currentSymbol;
+  localStorage.setItem('lastSymbol', currentSymbol);
+
+  loadInfo().catch(console.error);
+  refreshQuote().catch(console.error);
+  loadHistory().catch(console.error);
+}
+async function searchSuggest(){
+  const q = $('inpSymbol').value.trim();
+  if(q.length<2) return;
+  try{
+    const r = await fetch(API+'?action=search',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({q}) });
+    const d = await r.json();
+    const list = $('symList'); list.innerHTML = '';
+    if(d && d.ok && Array.isArray(d.items)){
+      d.items.forEach(it=>{
+        const opt = document.createElement('option');
+        opt.value = it.symbol;
+        opt.label = (it.company_name || '') + (it.industry ? (' · ' + it.industry) : '');
+        list.appendChild(opt);
+      });
+    }
+  }catch{}
+}
+/* ========= 報價 / 公司資料 / 預測 ========= */
+function quoteFromHistory(rows){
+  if(!rows?.length) return null;
+  let idx=0; for(let i=1;i<rows.length;i++){ if(new Date(rows[i].date)>new Date(rows[idx].date)) idx=i; }
+  const latest = rows[idx];
+  let prev=null, prevDate=0;
+  for(let i=0;i<rows.length;i++){
+    if(i===idx) continue;
+    const t=new Date(rows[i].date).getTime();
+    if(t>prevDate){ prevDate=t; prev=rows[i]; }
+  }
+  const lastClose = latest.close ?? latest.adjclose ?? null;
+  const prevClose = prev?.close ?? null;
+  const pct = (lastClose!=null && prevClose!=null && prevClose!==0) ? ((lastClose-prevClose)/prevClose*100) : null;
+  return {
+    price: lastClose, pct_change: pct, volume: latest.volume ?? null, asof: latest.date,
+    open: latest.open, high: latest.high, low: latest.low, last_close: prevClose
+  };
+}
+async function refreshQuote(){
+  if(!currentSymbol) return;
+  setQuoteCard({loading:true});
+  let d=null, errNote='';
+  try{
+    const r = await fetch(API+'?action=quote_live',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
+      body: JSON.stringify({symbol:currentSymbol})
+    });
+    d = await r.json();
+  }catch(e){ d={ok:false}; errNote=String(e); }
+  if(d && d.ok){
+    quoteCache = d;
+    setQuoteCard({ price:d.price, pct_change:d.pct_change, volume:d.volume, asof:d.asof,
+      prev:d.last_close, open:d.open, high:d.high, low:d.low });
+  }else{
+    const fb = quoteFromHistory(currentRows);
+    if(fb){
+      setQuoteCard({ price:fb.price, pct_change:fb.pct_change, volume:fb.volume, asof:fb.asof,
+        prev:fb.last_close, open:fb.open, high:fb.high, low:fb.low,
+        error:(d?.error || errNote || 'no_quote') + '（已改用最近交易日）' });
+      quoteCache = fb;
+    }else{
+      setQuoteCard({ error: d?.error || errNote || '讀取失敗' });
+    }
+  }
+}
+function setQuoteCard({price,pct_change,volume,asof,prev,open,high,low,loading,error}){
+  $('qPrice').textContent = loading ? '讀取中…' : fmtNum(price, 4);
+  $('qPct').textContent   = loading ? '—' : fmtPct(pct_change);
+  $('qVol').textContent   = loading ? '—' : (volume==null?'—':Number(volume).toLocaleString());
+  $('qTime').textContent  = loading ? '—' : toLocalTime(asof);
+  $('qPrev').textContent  = prev==null ? '—' : fmtNum(prev,4);
+  $('qOpen').textContent  = open==null ? '—' : fmtNum(open,4);
+  $('qHigh').textContent  = high==null ? '—' : fmtNum(high,4);
+  $('qLow').textContent   = low==null  ? '—' : fmtNum(low,4);
+  $('qNote').textContent  = error ? ('提示：'+error) : '';
+}
+async function loadInfo(){
+  if(!currentSymbol) return;
+  try{
+    const r = await fetch(API+'?action=info',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
+      body: JSON.stringify({symbol:currentSymbol})
+    });
+    const d = await r.json();
+    if(r.ok && d.ok && d.info){
+      const i = d.info;
+      const has = (i.company_name||i.industry||i.market_cap!=null||i.pe!=null||i.dividend_yield!=null);
+      if(has){
+        $('iName').textContent     = i.company_name || '—';
+        $('iIndustry').textContent = i.industry || '—';
+        $('iMktcap').textContent   = i.market_cap!=null ? fmtNum(i.market_cap) : '—';
+        $('iPE').textContent       = i.pe!=null ? Number(i.pe).toFixed(2) : '—';
+        $('iDY').textContent       = i.dividend_yield!=null ? (i.dividend_yield*100).toFixed(2)+'%' : '—';
+        return;
+      }
+    }
+  }catch{}
+  try{
+    const r2 = await fetch(API+'?action=search',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
+      body: JSON.stringify({q: currentSymbol})
+    });
+    const d2 = await r2.json();
+    if(d2?.ok && Array.isArray(d2.items)){
+      const found = d2.items.find(it => (it.symbol||'').toUpperCase() === currentSymbol.toUpperCase());
+      if(found){
+        $('iName').textContent     = found.company_name || '—';
+        $('iIndustry').textContent = found.industry || '—';
+      }
+    }
+  }catch{}
+}
+async function doPredict(){
+  if(!currentSymbol) return;
+  const r = await fetch(API+'?action=predict',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
+    body: JSON.stringify({symbol:currentSymbol})
+  });
+  const d = await r.json();
+  if(r.ok && d.ok){
+    $('pMethod').textContent = d.method || '—';
+    $('pLast').textContent   = (d.last_close_date ? d.last_close_date + ' ' : '') + (d.last_close ?? '');
+    $('pNext').textContent   = d.pred_close ?? '—';
+  }else{
+    $('pMethod').textContent = '—';
+    $('pLast').textContent   = '—';
+    $('pNext').textContent   = '失敗';
+  }
+}
+async function doPredictTarget(){
+  if(!currentSymbol) return;
+  const r = await fetch(API+'?action=predict_target', {
+    method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
+    body: JSON.stringify({symbol:currentSymbol, horizon:20})
+  });
+  const d = await r.json();
+  if(r.ok && d.ok){
+    $('pMethodTarget').textContent = (d.method || 'target_model');
+    $('pHorizon').textContent      = (d.horizon_days || 20) + ' 日';
+    $('pTech').textContent         = d.tech_target != null ? d.tech_target : '—';
+    $('pVal').textContent          = d.val_target  != null ? d.val_target  : '—';
+    $('pSuggest').textContent      = d.suggested_target != null ? d.suggested_target : (d.tech_target ?? '—');
+  }else{
+    $('pMethodTarget').textContent = '—';
+    $('pHorizon').textContent      = '—';
+    $('pTech').textContent         = '—';
+    $('pVal').textContent          = '—';
+    $('pSuggest').textContent      = d?.error || '失敗';
+  }
+}
+
+/* ========= 歷史 / 指標 / 畫圖 ========= */
+async function loadHistory(){
+  if(!currentSymbol) return;
+  try{
+    let r = await fetch(API+'?action=history',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
+      body: JSON.stringify({symbol:currentSymbol,limit:360})
+    });
+    let d = await r.json();
+    let rows = (d && d.ok && Array.isArray(d.rows)) ? d.rows : [];
+    if(!rows.length){
+      await fetch(API+'?action=update_today',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
+        body: JSON.stringify({symbol:currentSymbol})
+      });
+      r = await fetch(API+'?action=history',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
+        body: JSON.stringify({symbol:currentSymbol,limit:360})
+      });
+      d = await r.json();
+      rows = (d && d.ok && Array.isArray(d.rows)) ? d.rows : [];
+    }
+    currentRows = rows;
+    if(!currentRows.length){
+      $('kchart').innerHTML = '<div class="p-4 text-sm text-slate-500">查無歷史資料，請按「更新到最新日K」再試。</div>';
+      return;
+    }
+    fillHistory(currentRows);
+    drawK(true);
+
+    const fb = quoteFromHistory(currentRows);
+    if(fb && (!quoteCache || !quoteCache.price)){
+      setQuoteCard({
+        price:fb.price, pct_change:fb.pct_change, volume:fb.volume, asof:fb.asof,
+        prev:fb.last_close, open:fb.open, high:fb.high, low:fb.low,
+        error:'即時來源暫不可用（已用最近交易日）'
+      });
+      quoteCache = fb;
+    }
+  }catch(e){
+    $('kchart').innerHTML = '<div class="p-4 text-sm text-rose-500">讀取歷史資料失敗：'+ (e?.message||e) +'</div>';
+  }
+}
+function fillHistory(rows){
+  rows.forEach(r=>{
+    if(r.open==null)  r.open  = r.close;
+    if(r.high==null)  r.high  = r.close;
+    if(r.low==null)   r.low   = r.close;
+  });
+}
+function resample(rows, tf){
+  if(tf==='D') return rows.slice();
+  const out = {};
+  for(const r of rows){
+    const d = new Date(r.date);
+    let key;
+    if(tf==='W'){
+      const wd = (d.getDay()+6)%7; const monday = new Date(d); monday.setDate(d.getDate()-wd);
+      key = monday.toISOString().slice(0,10);
+    }else{
+      key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-01';
+    }
+    const o = out[key] || (out[key]={date:key, open:r.open, high:r.high, low:r.low, close:r.close, volume:0});
+    o.high   = Math.max(num(o.high), num(r.high));
+    o.low    = Math.min(num(o.low),  num(r.low));
+    o.open   = r.open;
+    o.close  = o.close ?? r.close;
+    o.volume += (r.volume||0);
+  }
+  return Object.values(out).sort((a,b)=> new Date(b.date)-new Date(a.date));
+}
+function SMA(arr, n){
+  const out = new Array(arr.length).fill(NaN); let sum=0, q=[];
+  for(let i=0;i<arr.length;i++){
+    const v = Number.isFinite(arr[i])?arr[i]:NaN;
+    q.push(v); if(Number.isFinite(v)) sum+=v;
+    if(q.length>n){ const old=q.shift(); if(Number.isFinite(old)) sum-=old; }
+    if(q.length===n && q.every(Number.isFinite)) out[i]=sum/n;
+  } return out;
+}
+function EMA(arr, n){
+  const out = new Array(arr.length).fill(NaN); const k = 2/(n+1); let prev;
+  for(let i=0;i<arr.length;i++){
+    const v = arr[i];
+    if(!Number.isFinite(v)) { out[i]=Number.isFinite(prev)?prev:NaN; continue; }
+    prev = prev==null ? v : v*k + prev*(1-k); out[i] = prev;
+  } return out;
+}
+function RSI(close, n=14){
+  const out = new Array(close.length).fill(NaN); let avgU=0, avgD=0;
+  for(let i=1;i<close.length;i++){
+    const ch = close[i]-close[i-1]; const u = Math.max(ch,0), d = Math.max(-ch,0);
+    if(i<=n){ avgU+=u; avgD+=d; if(i===n){ avgU/=n; avgD/=n; const rs=avgU/(avgD||1e-9); out[i]=100-(100/(1+rs)); } }
+    else{ avgU=(avgU*(n-1)+u)/n; avgD=(avgD*(n-1)+d)/n; const rs=avgU/(avgD||1e-9); out[i]=100-(100/(1+rs)); }
+  } return out;
+}
+function MACD(close, a=12, b=26, s=9){
+  const emaA = EMA(close,a), emaB = EMA(close,b);
+  const macd = emaA.map((v,i)=> (Number.isFinite(v)&&Number.isFinite(emaB[i])) ? v-emaB[i] : NaN);
+  const signal = EMA(macd, s); return { macd, signal };
+}
+function BOLL(close, n=20, k=2){
+  const ma = SMA(close,n); const U = new Array(close.length).fill(NaN); const L = new Array(close.length).fill(NaN);
+  for(let i=0;i<close.length;i++){
+    if(i+1<n || !Number.isFinite(ma[i])) continue;
+    let sum=0, sum2=0;
+    for(let j=i-n+1;j<=i;j++){ const v = close[j]; if(!Number.isFinite(v)){ sum=null; break; } sum+=v; sum2+=v*v; }
+    if(sum==null) continue;
+    const mean = ma[i]; const variance = sum2/n - (mean*mean); const sd = Math.sqrt(Math.max(variance,0));
+    U[i]=mean+k*sd; L[i]=mean-k*sd;
+  } return { upper:U, lower:L };
+}
+function drawK(isFirst=false){
+  if(!currentRows || !currentRows.length){
+    $('kchart').innerHTML = '<div class="p-4 text-sm text-slate-500">沒有可畫的資料</div>';
+    return;
+  }
+  let rows = resample(currentRows, currentTF);
+  if(rangeSel!=='MAX'){
+    const map={ '3M':65,'6M':130,'1Y':260,'2Y':520 };
+    rows = rows.slice(0, map[rangeSel] || rows.length);
+  }
+  const asc=[...rows].reverse();
+  const x     = asc.map(r=>r.date);
+  const open  = asc.map(r=> num(r.open,  num(r.close)));
+  const high  = asc.map(r=> num(r.high,  num(r.close)));
+  const low   = asc.map(r=> num(r.low,   num(r.close)));
+  const close = asc.map(r=> num(r.close, NaN));
+  const vol   = asc.map(r=> num(r.volume,0));
+
+  const traces = [{type:'candlestick', x, open, high, low, close, yaxis:'y', name:'K'}];
+  if($('chkMA').checked){ [5,10,20,60].forEach(n=> traces.push({type:'scatter',mode:'lines',x, y:SMA(close,n), yaxis:'y', name:'MA'+n, line:{width:1.2}})); }
+  if($('chkEMA').checked){ [12,26].forEach(n=> traces.push({type:'scatter',mode:'lines',x, y:EMA(close,n), yaxis:'y', name:'EMA'+n, line:{width:1.2}})); }
+  if($('chkBOLL').checked){
+    const bb=BOLL(close,20,2);
+    traces.push({type:'scatter',mode:'lines',x,y:bb.upper,yaxis:'y',name:'BOLL上',line:{width:1}});
+    traces.push({type:'scatter',mode:'lines',x,y:bb.lower,yaxis:'y',name:'BOLL下',line:{width:1}});
+  }
+  const rsi  = RSI(close,14);
+  const macd = MACD(close,12,26,9);
+  traces.push({type:'bar', x, y:vol,          xaxis:'x', yaxis:'y2', name:'量',     opacity:0.5});
+  traces.push({type:'scatter', mode:'lines', x, y:rsi,        xaxis:'x', yaxis:'y3', name:'RSI(14)',  visible: $('chkRSI').checked  ? true : 'legendonly'});
+  traces.push({type:'scatter', mode:'lines', x, y:macd.macd,  xaxis:'x', yaxis:'y4', name:'MACD',     visible: $('chkMACD').checked ? true : 'legendonly'});
+  traces.push({type:'scatter', mode:'lines', x, y:macd.signal,xaxis:'x', yaxis:'y4', name:'Signal',   visible: $('chkMACD').checked ? true : 'legendonly'});
+
+  const dark = isDark();
+  const layout = {
+    margin:{l:50,r:160,t:20,b:30},
+    xaxis:{rangeslider:{visible:false}, showgrid:false},
+    yaxis:{domain:[0.55,1.0], title:'價格'},
+    xaxis2:{matches:'x', showgrid:false},
+    yaxis2:{domain:[0.48,0.55], title:'量'},
+    yaxis3:{domain:[0.30,0.45], title:'RSI'},
+    yaxis4:{domain:[0.05,0.28], title:'MACD'},
+    legend:{x:1.02, y:1, orientation:'v'},
+    dragmode:'pan',
+    hovermode:'x unified',
+    paper_bgcolor: dark ? '#0f172a' : '#ffffff',
+    plot_bgcolor:  dark ? '#0f172a' : '#ffffff',
+    font:{color:   dark ? '#e2e8f0' : '#0f172a'}
+  };
+  const config = {displayModeBar:true, responsive:true};
+  const el = $('kchart');
+  if(isFirst || !el.dataset.inited){ Plotly.newPlot(el, traces, layout, config); el.dataset.inited='1'; }
+  else{ Plotly.react(el, traces, layout, config); }
+}
+window.addEventListener('resize', ()=>{ try{ Plotly.Plots.resize($('kchart')); }catch{} });
+
+/* ========= 其它 ========= */
+async function updateToday(){
+  if(!currentSymbol) return;
+  await fetch(API+'?action=update_today',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
+    body: JSON.stringify({symbol:currentSymbol})
+  });
+  await loadHistory();
+  await refreshQuote();
+}
+function setTheme(mode){
+  if(mode==='dark') document.documentElement.classList.add('dark');
+  else document.documentElement.classList.remove('dark');
+  localStorage.setItem('theme', mode);
+  drawK();
+}
+function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+function num(v, fb){ const n = (v==null||v==='')?NaN:+v; return Number.isFinite(n)?n:(fb??NaN); }
 </script>
 </body>
 </html>

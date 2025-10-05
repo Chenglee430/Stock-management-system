@@ -1,104 +1,222 @@
 <?php
-require_once __DIR__ . '/config.php';
-boot_session(); json_headers(); require_login();
-$mysqli = db();
+require_once __DIR__.'/config.php';
 
-$action   = $_GET['action'] ?? '';
-$symbol   = strtoupper(trim($_GET['symbol'] ?? ''));
-$industry = trim($_GET['industry'] ?? '');
+// DB 可能未建；失敗也不要中斷
+$pdo = null; try{ $pdo = db(); }catch(Exception $e){ $pdo=null; }
 
-function symClause(){ return "symbol IN (?, REPLACE(?, '.TW',''), CONCAT(REPLACE(?,'.TW',''),'.TWO'))"; }
+$action = $_GET['action'] ?? '';
+$BODY = json_decode(file_get_contents('php://input'), true) ?: [];
 
-// --- 將指定 symbol 更新到最新可得收盤（若當日未收盤，會是前一交易日） ---
-function ensure_latest($symbol){
-  $py = (PHP_OS_FAMILY==='Windows')?'python':'python3';
-  // backfill_one.py 會自動使用「今天～往前」策略補滿且寫入 DB（已改為動態日期）
-  $cmd = $py.' '.escapeshellarg(__DIR__.'/backfill_one.py').' '.escapeshellarg($symbol);
-  @exec($cmd.' 2>&1', $out, $code);
-  // 不管結果（首次無資料可能會 fail，但我們仍回 DB 查）
-  return [$code, $out];
-}
-
-// --- update_today: 手動觸發最新化 ---
-if ($action === 'update_today') {
-  if ($symbol === '') json_out(['error'=>'缺少 symbol'],400);
-  [$code,$out] = ensure_latest($symbol);
-
-  // 回報 DB 最後一天與收盤
-  $stmt = $mysqli->prepare("SELECT date, close FROM stock_data WHERE ".symClause()." ORDER BY date DESC LIMIT 1");
-  $stmt->bind_param('sss',$symbol,$symbol,$symbol);
-  $stmt->execute(); $stmt->bind_result($d,$c);
-  if ($stmt->fetch()) {
-    json_out(['success'=>true,'last_date'=>$d,'last_close'=>$c,'runner'=>$out]);
+function rows_to_history($rows){
+  $out=[]; foreach($rows as $r){
+    $out[]=[
+      'date'=>$r['date'],
+      'open'=>is_null($r['open'])?null:(float)$r['open'],
+      'high'=>is_null($r['high'])?null:(float)$r['high'],
+      'low' =>is_null($r['low']) ?null:(float)$r['low'],
+      'close'=>is_null($r['close'])?null:(float)$r['close'],
+      'volume'=>is_null($r['volume'])?null:(int)$r['volume'],
+    ];
   }
-  json_out(['error'=>'no_data_after_update','runner'=>$out], 500);
+  return array_reverse($out); // 新→舊
 }
 
-// --- info ---
-if ($action === 'info') {
-  if ($symbol === '') json_out(['error'=>'缺少 symbol'],400);
-  ensure_latest($symbol);
-  $sql="SELECT company_name, industry, MAX(date) FROM stock_data WHERE ".symClause();
-  $stmt=$mysqli->prepare($sql); $stmt->bind_param('sss',$symbol,$symbol,$symbol);
-  $stmt->execute(); $stmt->bind_result($name,$ind,$last);
-  if ($stmt->fetch()) json_out(['symbol'=>$symbol,'company_name'=>$name,'industry'=>$ind,'last_date'=>$last?:null]);
-  json_out(['error'=>'no_data'],404);
+function get_company_info_safe($sym){
+  global $PYTHON,$PY_INFO,$pdo;
+  if(exec_available()){
+    [$ret,$d] = shell_json(escapeshellcmd("$PYTHON \"{$PY_INFO}\" ".escapeshellarg($sym)));
+    if(!empty($d) && empty($d['error'])) return $d;
+  }
+  $d = y_info($sym);
+  if(empty($d['error'])) return $d;
+  if($pdo){
+    $st=$pdo->prepare("SELECT MAX(company_name) AS company_name, MAX(industry) AS industry FROM stock_data WHERE symbol IN (?, REPLACE(?, '.TW',''))");
+    $st->execute([$sym,$sym]); $r=$st->fetch();
+    return ['symbol'=>$sym,'company_name'=>$r['company_name']??null,'industry'=>$r['industry']??null];
+  }
+  return ['symbol'=>$sym];
 }
 
-// --- history（查前先更新）---
-if ($action === 'history') {
-  if ($symbol === '') json_out(['error'=>'缺少 symbol'],400);
-  ensure_latest($symbol);
-  $sql="SELECT date, close FROM stock_data WHERE ".symClause()." ORDER BY date";
-  $stmt=$mysqli->prepare($sql); $stmt->bind_param('sss',$symbol,$symbol,$symbol);
-  $stmt->execute(); $res=$stmt->get_result(); $rows=[];
-  while($r=$res->fetch_assoc()) $rows[]=$r;
-  if (!$rows) json_out(['error'=>'no_data'],404);
-  json_out(['symbol'=>$symbol,'history'=>$rows]);
+// 不強制登入，避免因 session/CORS 造成整站失效
+if($action==='health'){ json_out(['ok'=>true,'exec'=>exec_available(),'db'=>$GLOBALS['pdo']?'ok':'unavailable']); }
+if($action==='markets'){ json_out(['ok'=>true,'items'=>['TW','US']]); }
+
+if($action==='quote_live'){
+  $sym = normalize_symbol($BODY['symbol']??'');
+  // 先 Python
+  if(exec_available()){
+    global $PYTHON,$PY_QUOTE;
+    [$ret,$d] = shell_json(escapeshellcmd("$PYTHON \"{$PY_QUOTE}\" ".escapeshellarg($sym)));
+    if(!empty($d) && empty($d['error'])) json_out(['ok'=>true]+$d);
+  }
+  // Yahoo 後備（永不 500）
+  $d = y_quote($sym);
+  if(empty($d['error'])) json_out(['ok'=>true]+$d);
+  json_out(['ok'=>false,'error'=>$d['error']??'quote_failed']); // 200
 }
 
-// --- 最高價（查前先更新）---
-if ($action === 'highest') {
-  if ($symbol === '') json_out(['error'=>'缺少 symbol'],400);
-  ensure_latest($symbol);
-  $sql="SELECT MAX(close) FROM stock_data WHERE ".symClause();
-  $stmt=$mysqli->prepare($sql); $stmt->bind_param('sss',$symbol,$symbol,$symbol);
-  $stmt->execute(); $stmt->bind_result($mx);
-  if ($stmt->fetch()) json_out(['symbol'=>$symbol,'highest'=>$mx]);
-  json_out(['error'=>'no_data'],404);
+if($action==='info'){
+  $sym = normalize_symbol($BODY['symbol']??'');
+  $d = get_company_info_safe($sym);
+  if(!empty($d['error'])) json_out(['ok'=>false]+$d); // 200
+  json_out(['ok'=>true,'info'=>$d]);
 }
 
-// --- by_industry（此處不強制更新全部，維持原樣）---
-if ($action === 'by_industry') {
-  if ($industry === '') json_out(['error'=>'缺少 industry'],400);
-  $stmt=$mysqli->prepare("SELECT DISTINCT symbol, company_name FROM stock_data WHERE industry LIKE CONCAT('%',?,'%') LIMIT 200");
-  $stmt->bind_param('s',$industry); $stmt->execute(); $res=$stmt->get_result(); $rows=[];
-  while($r=$res->fetch_assoc()) $rows[]=$r;
-  json_out(['industry'=>$industry,'symbols'=>$rows]);
+if($action==='history'){
+  $sym = normalize_symbol($BODY['symbol']??''); $limit = max(60,(int)($BODY['limit']??240));
+  $rows=[];
+  if($pdo){
+    try{
+      $st=$pdo->prepare("SELECT date,open,high,low,close,volume FROM stock_data WHERE symbol IN (?, REPLACE(?, '.TW','')) ORDER BY date ASC");
+      $st->execute([$sym,$sym]); $rows=$st->fetchAll();
+      $rows = array_slice($rows, max(0,count($rows)-$limit));
+    }catch(Exception $e){ $rows=[]; }
+  }
+  if(!$rows){
+    [$rowsY,$err] = y_history_rows($sym,'10y','1d');
+    if(!$err && $rowsY){
+      $rows=$rowsY;
+      if($pdo){
+        $ins=$pdo->prepare("INSERT INTO stock_data(symbol,date,open,high,low,close,volume) VALUES(?,?,?,?,?,?,?)
+                            ON DUPLICATE KEY UPDATE open=VALUES(open), high=VALUES(high), low=VALUES(low), close=VALUES(close), volume=VALUES(volume)");
+        foreach($rowsY as $r){ $ins->execute([$sym,$r['date'],$r['open'],$r['high'],$r['low'],$r['close'],$r['volume']]); }
+      }
+    }
+  }
+  json_out(['ok'=>true,'rows'=>rows_to_history($rows)]);
 }
 
-// --- 預測（會先更新到最新，回傳明日預測價）---
+if($action==='update_today'){
+  $sym = normalize_symbol($BODY['symbol']??'');
+  $success=false; $note='';
+  if(exec_available()){
+    global $PYTHON,$PY_BACKFILL;
+    [$ret,$d] = shell_json(escapeshellcmd("$PYTHON \"{$PY_BACKFILL}\" ".escapeshellarg($sym)));
+    $success = !empty($d['success']); $note = $success ? '已更新(Py)':'嘗試更新(Py)';
+  }
+  if(!$success){
+    [$rows,$err] = y_history_rows($sym,'10y','1d');
+    if(!$err && $rows){
+      if($pdo){
+        $ins=$pdo->prepare("INSERT INTO stock_data(symbol,date,open,high,low,close,volume) VALUES(?,?,?,?,?,?,?)
+                            ON DUPLICATE KEY UPDATE open=VALUES(open), high=VALUES(high), low=VALUES(low), close=VALUES(close), volume=VALUES(volume)");
+        foreach($rows as $r){ $ins->execute([$sym,$r['date'],$r['open'],$r['high'],$r['low'],$r['close'],$r['volume']]); }
+      }
+      $success=true; $note='已更新(Yahoo)';
+    }else{ $note='更新失敗：'.($err?:'unknown'); }
+  }
+  // 最新一筆（DB 可用則取 DB；否則取剛抓的 rows 末筆）
+  $latest=null;
+  if($pdo){
+    $st=$pdo->prepare("SELECT date,open,high,low,close,volume FROM stock_data WHERE symbol IN (?, REPLACE(?, '.TW','')) ORDER BY date DESC LIMIT 1");
+    $st->execute([$sym,$sym]); $latest=$st->fetch();
+  }
+  if(!$latest){
+    [$rows,$err] = y_history_rows($sym,'1y','1d');
+    if(!$err && $rows) $latest = end($rows);
+  }
+  json_out(['ok'=>true,'success'=>$success,'note'=>$note,'latest'=>$latest]);
+}
+
+if($action==='predict'){
+  $sym = normalize_symbol($BODY['symbol']??'');
+  if(exec_available()){
+    global $PYTHON,$PY_PREDICT;
+    [$ret,$d] = shell_json("$PYTHON \"{$PY_PREDICT}\" ".escapeshellarg($sym).' '.escapeshellarg(''));
+    if(!empty($d['success'])){
+      json_out(['ok'=>true,'method'=>$d['method'],'last_close'=>$d['last_close'],'last_close_date'=>$d['last_close_date'],'pred_close'=>$d['next_close_pred'],'proxy_used'=>$d['proxy_used']??null]);
+    }
+  }
+  // 後備：線性回歸 60 根（DB / Yahoo）
+  $series=[];
+  if($pdo){
+    try{
+      $st=$pdo->prepare("SELECT date, close FROM stock_data WHERE symbol IN (?, REPLACE(?, '.TW','')) ORDER BY date DESC LIMIT 60");
+      $st->execute([$sym,$sym]); $rows=$st->fetchAll(); $series=array_reverse($rows);
+    }catch(Exception $e){}
+  }
+  if(!$series){
+    [$rows,$err] = y_history_rows($sym,'1y','1d');
+    if(!$err && $rows) $series = array_slice($rows,-60);
+  }
+  if(!$series) json_out(['ok'=>false,'error'=>'no_data_for_prediction']); // 200
+
+  $n=count($series); $sx=$sy=$sxx=$sxy=0.0;
+  for($i=1;$i<=$n;$i++){ $x=$i; $y=(float)$series[$i-1]['close']; $sx+=$x; $sy+=$y; $sxx+=$x*$x; $sxy+=$x*$y; }
+  $den = ($n*$sxx - $sx*$sx) ?: 1;
+  $b = ($n*$sxy - $sx*$sy) / $den; $a = ($sy - $b*$sx) / $n;
+  $pred = $a + $b*($n+1);
+  json_out(['ok'=>true,'method'=>'PHP_LR(60)','last_close'=>(float)$series[$n-1]['close'],'last_close_date'=>$series[$n-1]['date'],'pred_close'=>round($pred,4)]);
+}
+
+// 其餘需要 DB 的功能：若 DB 不可用就回空而不是 500
+if($action==='rankings' || $action==='screen' || $action==='portfolio_backtest'){
+  if(!$pdo) json_out(['ok'=>false,'error'=>'db_unavailable']);
+}
+
+json_out(['ok'=>false,'error'=>'unknown_action']);
+
+// === 預測「隔日收盤價」===
 if ($action === 'predict') {
-  if ($symbol === '') json_out(['error'=>'缺少 symbol'],400);
-  ensure_latest($symbol);
-  $py = (PHP_OS_FAMILY==='Windows')?'python':'python3';
-  $cmd = $py.' '.escapeshellarg(__DIR__.'/stock_predictor.py').' '.escapeshellarg($symbol).' lr';
-  @exec($cmd.' 2>&1', $out, $code);
-  $raw = implode("\n",$out);
-  $j = json_decode($raw, true);
-  if (is_array($j) && !empty($j['success'])) json_out($j);
-  json_out(['error'=>'predict_fail','detail'=>$out],500);
-}
+    $input  = json_decode(file_get_contents('php://input'), true);
+    $symbol = trim($input['symbol'] ?? '');
+    if ($symbol === '') { echo json_encode(['ok'=>false,'error'=>'no_symbol']); exit; }
 
-// --- 管理工具（保留）---
-if ($action === 'admin_audit') {
-  $res=$mysqli->query("SELECT symbol, COUNT(*) AS cnt FROM stock_data GROUP BY symbol ORDER BY symbol LIMIT 2000");
-  $rows=[]; while($r=$res->fetch_assoc()) $rows[]=$r;
-  json_out(['total'=>count($rows),'symbols'=>$rows]);
-}
-if ($action === 'admin_repair') {
-  $mysqli->query("UPDATE stock_data SET symbol=CONCAT(LEFT(symbol,4),'.TW') WHERE LENGTH(symbol)=4 AND symbol REGEXP '^[0-9]{4}$'");
-  json_out(['success'=>'ok']);
-}
+    $py  = 'python'; 
+    $cmd = escapeshellcmd($py) . ' ' .
+           escapeshellarg(__DIR__ . DIRECTORY_SEPARATOR . 'stock_predictor.py') . ' ' .
+           escapeshellarg($symbol);
 
-json_out(['error'=>'unknown_action'],400);
+    $json = shell_exec($cmd);
+    $out  = @json_decode($json, true);
+
+    if (isset($out['success']) && $out['success']) {
+        echo json_encode([
+          'ok'=>true,
+          'method' => $out['method'] ?? 'close_model',
+          'last_close' => $out['last_close'] ?? null,
+          'last_close_date' => $out['last_close_date'] ?? null,
+          'pred_close' => $out['next_close_pred'] ?? null,
+          'proxy' => $out['proxy_used'] ?? null,
+          'components' => $out['components'] ?? null
+        ]);
+    } else {
+        echo json_encode(['ok'=>false,'error'=>$out['error'] ?? 'predict_failed','raw'=>$json]);
+    }
+    exit;
+}
+// == 目標價預測 ==
+if ($action === 'predict_target') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    $symbol  = trim($input['symbol'] ?? '');
+    $horizon = intval($input['horizon'] ?? 20);  // 預設 20 交易日
+
+    if ($symbol === '') {
+        echo json_encode(['ok'=>false,'error'=>'no_symbol']); exit;
+    }
+
+    // Windows XAMPP：請確認 python 在 PATH；必要時改成 python.exe 的絕對路徑
+    $py = 'python';
+    $script = __DIR__ . DIRECTORY_SEPARATOR . 'stock_target_predictor.py';
+    $cmd = escapeshellcmd($py) . ' ' . escapeshellarg($script) . ' ' . escapeshellarg($symbol) . ' ' . escapeshellarg($horizon);
+
+    $json = shell_exec($cmd);
+    $out  = @json_decode($json, true);
+
+    if (isset($out['success']) && $out['success']) {
+        echo json_encode([
+            'ok' => true,
+            'method'          => $out['method'] ?? 'target_model',
+            'last_close'      => $out['last_close'] ?? null,
+            'last_close_date' => $out['last_close_date'] ?? null,
+            'horizon_days'    => $out['horizon_days'] ?? $horizon,
+            'tech_target'     => $out['tech_target'] ?? null,
+            'val_target'      => $out['val_target'] ?? null,
+            'suggested_target'=> $out['suggested_target'] ?? null,
+            'components'      => $out['components'] ?? null
+        ]);
+    } else {
+        echo json_encode(['ok'=>false,'error'=>$out['error'] ?? 'predict_target_failed','raw'=>$json]);
+    }
+    exit;
+}

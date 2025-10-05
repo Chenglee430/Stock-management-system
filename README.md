@@ -2,6 +2,8 @@
 
 
 待更新
+
+
 一個「帳號登入 + 股票資料庫 + 日更抓取 + 預測」的全端範例。前端單頁（Tailwind）透過 PHP API 操作 MySQL，並呼叫 Python 腳本批次/單檔更新 Yahoo Finance 日 K，同時提供簡單的線性回歸預測。
 
 > 前端：`index.html`（登入、查詢、預測 UI）

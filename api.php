@@ -154,8 +154,6 @@ if($action==='rankings' || $action==='screen' || $action==='portfolio_backtest')
   if(!$pdo) json_out(['ok'=>false,'error'=>'db_unavailable']);
 }
 
-json_out(['ok'=>false,'error'=>'unknown_action']);
-
 // === 預測「隔日收盤價」===
 if ($action === 'predict') {
     $input  = json_decode(file_get_contents('php://input'), true);
@@ -217,6 +215,9 @@ if ($action === 'predict_target') {
         ]);
     } else {
         echo json_encode(['ok'=>false,'error'=>$out['error'] ?? 'predict_target_failed','raw'=>$json]);
+
     }
     exit;
 }
+
+json_out(['ok'=>false,'error'=>'unknown_action']);

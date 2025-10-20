@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
+import os, sys, json
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+os.environ["PYTHONIOENCODING"] = "utf-8"
 
 import sys, json, warnings
 from datetime import datetime
@@ -18,9 +23,8 @@ except Exception as e:
     sys.exit(0)
 
 # 依你的環境調整
-DB = dict(host='localhost', user='root', password='', database='stock_db')
+DB = dict(host='127.0.0.1', user='stockapp', password='920430', database='stock_db')
 MIN_ROWS = 60
-
 # 常見台股↔海外對應；沒有 ADR 的留 None（避免亂配）
 ADR_MAP = {
     '2330': 'TSM',      # 台積電

@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
+
+# -*- coding: utf-8 -*-
+import os, sys, json
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+os.environ["PYTHONIOENCODING"] = "utf-8"
+
+
+# 建議：若你的摘要會輸出特殊符號（例如 ≤ ≥ ★ …），請改成 ASCII：
+# text = text.replace("≤", "<=").replace("≥", ">=").replace("★", "*")
 
 import sys, json, warnings, math
 from datetime import datetime
@@ -11,8 +22,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore")
 
 # === 環境參數（依你的 MySQL 調整） ===
-DB = dict(host='localhost', user='root', password='', database='stock_db')
-
+DB = dict(host='127.0.0.1', user='stockapp', password='920430', database='stock_db')
 MIN_ROWS = 60                # 最少歷史筆數
 DEFAULT_HORIZON = 40         # 目標價看幾個交易日（約2個月）
 TECH_WEIGHT = 0.7            # 綜合權重：技術 70%
@@ -80,7 +90,7 @@ def future_high_label(df: pd.DataFrame, horizon=20):
     fut_high = np.nanmax(arr, axis=1)
     return pd.Series(fut_high, index=df.index, name='future_high')
 
-# === 簡單的 Ensemble（與你現有一致的基礎模型組合） ===
+# ===  Ensemble === 
 def ensemble_predict(X_train, y_train, X_pred):
     from sklearn.ensemble import RandomForestRegressor
     from sklearn.linear_model import LinearRegression, Ridge
@@ -115,6 +125,8 @@ def valuation_target(symbol_norm: str):
 def norm_symbol(s: str):
     s = (s or '').strip().upper()
     if s.isdigit() and len(s)==4: return s + '.TW'
+    if s.endswith('.TW') or s.endswith('.TWO'): # 檢查台股
+        return s
     return s.replace('.', '-')
 
 def main():
@@ -175,7 +187,6 @@ def main():
             suggested = tech_hat
         else:
             suggested = TECH_WEIGHT*tech_hat + VAL_WEIGHT*val_hat
-
         out = {
             'success': True,
             'symbol': raw.upper(),

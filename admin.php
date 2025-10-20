@@ -12,4 +12,3 @@ if ($_SERVER['REQUEST_METHOD']==='POST'){
   <h3>Daily Scraper</h3>
   <form method="post"><button>Run Now</button></form>
 </body></html>
-

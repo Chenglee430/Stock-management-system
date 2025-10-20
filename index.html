@@ -1,720 +1,429 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="utf-8"/>
+  <meta charset="utf-8" />
   <title>股票工具 Pro</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- 開發便利用 CDN（生產環境建議改本地編譯） -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <style>
-    :root{ color-scheme: light dark; }
-    body{ font-family: system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans TC",sans-serif; }
-    .mask{ background: rgba(0,0,0,.90); }
-    .hide{ display:none!important; visibility:hidden!important; opacity:0!important; pointer-events:none!important; }
-    /* ---- 圖表 ---- */
-    #kchart{ height: 640px; }
-    .plot-wrap{ position: relative; }
-    input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
-
-    /* 讓重設視窗一定蓋住登入視窗 */
-    #loginMask { z-index: 50; }
-    #fpMask    { z-index: 60; }
+    :root{color-scheme: light dark}
+    body{background:#0b1220;color:#e6edf3}
+    .mask{background:rgba(0,0,0,.55)}
+    .hide{display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important}
+    .card{background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:14px}
+    .btn{padding:.5rem .75rem;border-radius:.5rem;background:#1f2937}
+    .btn:hover{background:#334155}
   </style>
 </head>
-<body class="bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
-<header class="sticky top-0 z-10 backdrop-blur bg-white/70 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-800">
-  <div class="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
-    <div class="text-lg font-semibold">📈 股票工具 Pro</div>
-    <div class="flex-1"></div>
-    <button id="btnTheme" class="px-3 py-1.5 rounded-md text-sm border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">深/淺色</button>
-    <div id="userArea" class="text-sm opacity-80"></div>
-    <button id="btnLogout" class="px-3 py-1.5 rounded-md text-sm border border-rose-300 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30">登出</button>
-  </div>
-</header>
-
-<main class="max-w-7xl mx-auto px-4 py-4 space-y-4">
-
-  <!-- 搜尋列 -->
-  <section class="grid grid-cols-1 md:grid-cols-12 gap-3">
-    <div class="md:col-span-6 flex items-center gap-2">
-      <input id="inpSymbol" list="symList" class="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
-             placeholder="輸入代號或公司（例：2330 或 AAPL）"/>
-      <datalist id="symList"></datalist>
-      <button id="btnGo" class="px-3 py-2 rounded-md bg-slate-900 text-white dark:bg-white dark:text-slate-900">載入</button>
+<body>
+  <!-- 頂部列 -->
+  <header class="px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <div class="w-6 h-6 rounded bg-indigo-400"></div>
+      <div class="font-semibold">股票工具 Pro</div>
     </div>
-    <div class="md:col-span-6 grid grid-cols-2 md:grid-cols-4 gap-2">
-      <button id="btnQuote"  class="px-3 py-2 border rounded-md hover:bg-slate-100 dark:hover:bg-slate-800">即時報價</button>
-      <button id="btnInfo"   class="px-3 py-2 border rounded-md hover:bg-slate-100 dark:hover:bg-slate-800">公司基本資料</button>
-      <button id="btnUpdate" class="px-3 py-2 border rounded-md hover:bg-slate-100 dark:hover:bg-slate-800">更新到最新日K</button>
-      <button id="btnPredict" class="px-3 py-2 border rounded-md hover:bg-slate-100 dark:hover:bg-slate-800">預測</button>
-      <button id="btnPredictTarget" class="px-3 py-2 border rounded-md hover:bg-slate-100 dark:hover:bg-slate-800">目標價</button>
+    <div class="flex items-center gap-3">
+      <span id="loginUser" class="text-sm opacity-80"></span>
+      <button id="btnLoginOpen" class="btn">登入</button>
+      <button id="btnLogout" class="px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-500 hide">登出</button>
     </div>
-  </section>
+  </header>
 
-  <!-- 報價 / 公司資料 / 預測 -->
-  <section class="grid grid-cols-1 md:grid-cols-3 gap-4">
-    <!-- 即時報價 -->
-    <div class="border rounded-xl p-4 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
-      <div class="font-semibold mb-2">即時報價</div>
-      <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-        <div>最新價：<span id="qPrice">—</span></div>
-        <div>漲跌幅：<span id="qPct">—</span></div>
-        <div>成交量：<span id="qVol">—</span></div>
-        <div>時間：<span id="qTime">—</span></div>
-      </div>
-      <hr class="my-2 border-slate-200 dark:border-slate-700"/>
-      <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-        <div>昨收：<span id="qPrev">—</span></div>
-        <div>開盤：<span id="qOpen">—</span></div>
-        <div>最高：<span id="qHigh">—</span></div>
-        <div>最低：<span id="qLow">—</span></div>
-      </div>
-      <div id="qNote" class="text-xs opacity-70 mt-2"></div>
-    </div>
-
-    <!-- 公司基本資料 -->
-    <div class="border rounded-xl p-4 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
-      <div class="font-semibold mb-2">公司基本資料</div>
-      <div class="grid grid-cols-2 gap-2 text-sm">
-        <div>名稱：<span id="iName">—</span></div>
-        <div>產業：<span id="iIndustry">—</span></div>
-        <div>市值：<span id="iMktcap">—</span></div>
-        <div>PE：<span id="iPE">—</span></div>
-        <div>殖利率：<span id="iDY">—</span></div>
+  <main class="px-6 pb-24 max-w-6xl mx-auto">
+    <!-- 搜尋與操作列 -->
+    <div class="flex items-center gap-3">
+      <input id="symInput" class="flex-1 px-4 py-2 rounded bg-slate-900 border border-slate-700 outline-none"
+             placeholder="輸入代號，例如：TSLA 或 2330" />
+      <div class="flex flex-wrap gap-2">
+        <button id="btnQuote"  class="btn">即時報價</button>
+        <button id="btnInfo"   class="btn">公司基本資料</button>
+        <button id="btnUpdate" class="btn">更新到最新日K</button>
+        <button id="btnPredict" class="px-3 py-2 rounded bg-indigo-600 hover:bg-indigo-500">預測</button>
+        <button id="btnTarget"  class="px-3 py-2 rounded bg-sky-600 hover:bg-sky-500">目標價</button>
+        <button id="btnSignal"  class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500">操作建議</button>
+        <button id="btnRisk"    class="px-3 py-2 rounded bg-amber-600 hover:bg-amber-500">風險評估</button>
       </div>
     </div>
 
-    <!-- 預測結果 -->
-    <div class="border rounded-xl p-4 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
-      <div class="font-semibold mb-2">預測結果</div>
-      <div class="text-sm space-y-1" id="predBox">
-        <div>方法：<span id="pMethod">—</span></div>
-        <div>上次收盤：<span id="pLast">—</span></div>
-        <div>明日預測：<span id="pNext">—</span></div>
-        <hr class="my-2 border-slate-200 dark:border-slate-700"/>
-        <div>（目標）方法：<span id="pMethodTarget">—</span></div>
-        <div>（目標）視窗：<span id="pHorizon">—</span></div>
-        <div>（目標）技術面：<span id="pTech">—</span></div>
-        <div>（目標）估值面：<span id="pVal">—</span></div>
-        <div>（目標）建議目標價：<span id="pSuggest">—</span></div>
+    <!-- 三欄資訊 -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+      <!-- 報價 -->
+      <div class="card p-5">
+        <h3 class="font-semibold mb-3">即時報價</h3>
+        <div id="quoteBox" class="text-sm leading-7 opacity-90">
+          最新價：—　漲跌幅：—　成交量：— <br/>
+          昨收：—　開盤：—　最高：—　最低：—<br/>
+          提示：<span id="quoteMsg" class="text-rose-400">尚未查詢</span>
+        </div>
+      </div>
+      <!-- 公司資訊 -->
+      <div class="card p-5">
+        <h3 class="font-semibold mb-3">公司基本資料</h3>
+        <div id="infoBox" class="text-sm leading-7 opacity-90">
+          名稱：—　產業：—<br/>
+          市值：—　PE：—　股利：— / —<br/>
+          提示：<span id="infoMsg" class="text-rose-400">尚未查詢</span>
+        </div>
+      </div>
+      <!-- 預測/信號/風險（固定欄位） -->
+      <div class="card p-5">
+        <h3 class="font-semibold mb-3">預測結果</h3>
+        <div id="predBox" class="text-sm leading-7 opacity-90 space-y-2">
+          <div><b>方法</b>：<span id="pred_method">—</span>　<b>明日預測</b>：<span id="pred_next">—</span></div>
+          <div><b>建議</b>：<span id="pred_suggest">—</span>　<b>理由</b>：<span id="pred_reason">—</span></div>
+          <div><b>目標價</b>：<span id="pred_target">—</span>　<b>信心</b>：<span id="pred_target_conf">—</span></div>
+          <div><b>（近日操作）建議</b>：<span id="signal_advice">—</span>　
+               <b>理由</b>：<span id="signal_why">—</span>　
+               <b>有效期</b>：<span id="signal_days">—</span> 天</div>
+          <div><b>（風險）VaR95%</b>：<span id="risk_var95">—</span>　
+               <b>ATR</b>：<span id="risk_atr">—</span>　
+               <b>Kelly cap20%</b>：<span id="risk_kelly20">—</span></div>
+          <div>提示：<span id="predMsg" class="text-rose-400">尚未查詢</span></div>
+        </div>
+      </div>
+    </section>
 
+    <!-- K 線 -->
+    <section class="card p-5 mt-6">
+      <div class="flex items-center justify-between">
+        <h3 class="font-semibold">K 線</h3>
+        <div class="text-xs opacity-70">若無歷史資料，請先按「更新到最新日K」。</div>
       </div>
-    </div>
-  </section>
+      <div id="kchart" class="mt-4" style="height:420px;"></div>
+    </section>
+  </main>
 
-  <!-- K 線 -->
-  <section class="border rounded-xl p-3 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
-    <div class="flex flex-wrap items-center gap-2">
-      <div class="font-semibold mr-2">K 線</div>
-      <div class="flex items-center gap-1">
-        <button data-tf="D"  class="btn-tf px-3 py-1.5 rounded-md border">日K</button>
-        <button data-tf="W"  class="btn-tf px-3 py-1.5 rounded-md border">週K</button>
-        <button data-tf="M"  class="btn-tf px-3 py-1.5 rounded-md border">月K</button>
+  <!-- 登入視窗 -->
+  <div id="loginMask" class="fixed inset-0 mask flex items-center justify-center hide">
+    <div class="bg-slate-950 border border-slate-700 rounded-xl p-6 w-[360px]">
+      <h3 class="font-semibold mb-4">登入</h3>
+      <div class="space-y-3">
+        <input id="lgUser" class="w-full px-3 py-2 rounded bg-slate-900 border border-slate-700" placeholder="帳號（建議 Email）">
+        <input id="lgPass" class="w-full px-3 py-2 rounded bg-slate-900 border border-slate-700" placeholder="密碼（6 位數字）">
       </div>
-      <div class="flex items-center gap-1 ml-3">
-        <button data-range="3M"  class="btn-range px-2.5 py-1.5 rounded-md border text-sm">3M</button>
-        <button data-range="6M"  class="btn-range px-2.5 py-1.5 rounded-md border text-sm">6M</button>
-        <button data-range="1Y"  class="btn-range px-2.5 py-1.5 rounded-md border text-sm">1Y</button>
-        <button data-range="2Y"  class="btn-range px-2.5 py-1.5 rounded-md border text-sm">2Y</button>
-        <button data-range="MAX" class="btn-range px-2.5 py-1.5 rounded-md border text-sm">MAX</button>
+      <div class="flex items-center justify-between mt-4">
+        <button id="btnLogin" class="px-3 py-2 rounded bg-indigo-600 hover:bg-indigo-500">登入</button>
+        <div class="flex items-center gap-3">
+          <button id="btnRegister" class="text-sm opacity-80 hover:opacity-100">註冊</button>
+          <button id="btnForgot"   class="text-sm opacity-80 hover:opacity-100">忘記密碼</button>
+          <button id="btnCloseLogin" class="text-sm opacity-80 hover:opacity-100">關閉</button>
+        </div>
       </div>
-      <div class="flex items-center gap-3 ml-3 text-sm select-none">
-        <label class="inline-flex items-center gap-1"><input id="chkMA"   type="checkbox" class="accent-slate-900 dark:accent-white" checked>MA</label>
-        <label class="inline-flex items-center gap-1"><input id="chkEMA"  type="checkbox" class="accent-slate-900 dark:accent-white">EMA</label>
-        <label class="inline-flex items-center gap-1"><input id="chkBOLL" type="checkbox" class="accent-slate-900 dark:accent-white">布林</label>
-        <label class="inline-flex items-center gap-1"><input id="chkRSI"  type="checkbox" class="accent-slate-900 dark:accent-white" checked>RSI</label>
-        <label class="inline-flex items-center gap-1"><input id="chkMACD" type="checkbox" class="accent-slate-900 dark:accent-white" checked>MACD</label>
-      </div>
-    </div>
-    <div class="plot-wrap">
-      <div id="kchart" class="w-full mt-3"></div>
-    </div>
-  </section>
-
-</main>
-
-<!-- 登入 -->
-<div id="loginMask" class="fixed inset-0 mask flex items-center justify-center px-4 hide">
-  <div class="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 p-5 shadow-xl border border-slate-200 dark:border-slate-700">
-    <div class="text-lg font-semibold mb-3">請先登入</div>
-    <div class="space-y-2">
-      <input id="lgEmail" type="email" class="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Email"/>
-      <input id="lgPass"  type="password" inputmode="numeric" pattern="\d{6}" maxlength="6"
-             class="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-             placeholder="6位數字密碼"/>
-    </div>
-    <div id="lgMsg" class="text-sm text-rose-600 mt-2 min-h-5"></div>
-    <div class="mt-3 flex justify-between">
-      <div class="flex gap-2">
-        <button id="btnDoLogin" class="px-3 py-2 rounded-md bg-slate-900 text-white dark:bg-white dark:text-slate-900">登入</button>
-        <button id="btnDoRegister" class="px-3 py-2 rounded-md border">註冊</button>
-      </div>
-      <div class="flex gap-2">
-        <button id="btnForgot" class="px-3 py-2 rounded-md border">忘記密碼</button>
-      </div>
+      <div id="lgMsg" class="mt-3 text-sm text-rose-400"></div>
     </div>
   </div>
-</div>
 
-<!-- 忘記／重設密碼視窗 -->
-<div id="fpMask" class="fixed inset-0 mask flex items-center justify-center px-4 hide">
-  <div class="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 p-5 shadow-xl border border-slate-200 dark:border-slate-700">
-    <div class="text-lg font-semibold mb-3">重設密碼</div>
-    <div class="space-y-2">
-      <input id="fpEmail" type="email" class="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Email（先輸入帳號）"/>
-      <div class="flex gap-2">
-        <input id="fpCode" type="text" inputmode="numeric" maxlength="4" class="flex-1 px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-               placeholder="4 位驗證碼"/>
-        <button id="btnSendCode" class="px-3 py-2 rounded-md border">取得驗證碼</button>
+  <!-- 重設密碼 -->
+  <div id="fpMask" class="fixed inset-0 mask flex items-center justify-center hide">
+    <div class="bg-slate-950 border border-slate-700 rounded-xl p-6 w-[360px]">
+      <h3 class="font-semibold mb-4">重設密碼</h3>
+      <div class="space-y-3">
+        <input id="fpEmail" class="w-full px-3 py-2 rounded bg-slate-900 border border-slate-700" placeholder="帳號（與註冊相同）">
+        <div class="flex gap-2">
+          <input id="fpCode" class="flex-1 px-3 py-2 rounded bg-slate-900 border border-slate-700" placeholder="4 碼驗證碼">
+          <button id="btnSendCode" class="btn">取得驗證碼</button>
+        </div>
+        <input id="fpNew" class="w-full px-3 py-2 rounded bg-slate-900 border border-slate-700" placeholder="新密碼（6 位數字）">
       </div>
-      <input id="fpNew" type="password" inputmode="numeric" maxlength="6" class="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-             placeholder="新密碼（6位數字）"/>
-    </div>
-    <div id="fpMsg" class="text-sm mt-2 min-h-5"></div>
-    <div class="mt-3 flex justify-between">
-      <button id="btnDoReset" class="px-3 py-2 rounded-md bg-slate-900 text-white dark:bg-white dark:text-slate-900">確認重設</button>
-      <button id="btnFPClose" class="px-3 py-2 rounded-md border">關閉</button>
+      <div class="flex items-center justify-between mt-4">
+        <button id="btnResetPwd" class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500">確認重設</button>
+        <button id="btnFPClose" class="text-sm opacity-80 hover:opacity-100">返回登入</button>
+      </div>
+      <div id="fpMsg" class="mt-3 text-sm text-rose-400"></div>
     </div>
   </div>
-</div>
 
-<script>
-/* ========= 基本設定 ========= */
-const BASE = location.pathname.replace(/\/[^\/]*$/, '/'); // 此檔所在資料夾
-const API  = BASE + 'api.php';
-const AUTH = BASE + 'auth.php';
-const RESET= BASE + 'auth.php';
-const $ = id => document.getElementById(id);
-const fmtNum = (n, d=2) => (n==null || isNaN(n)) ? '—' : Number(n).toLocaleString(undefined, {maximumFractionDigits:d});
-const fmtPct = n => (n==null || isNaN(n)) ? '—' : ((n>0?'+':'') + Number(n).toFixed(2) + '%');
-const cls = (el, on, c) => el.classList[on?'add':'remove'](c);
-const isDark = () => document.documentElement.classList.contains('dark');
-
-/* 智能時間：支援秒/毫秒/ISO/純日期 */
-function toLocalTime(t){
-  if (t==null || t==='') return '—';
-  if (typeof t === 'number'){
-    const ms = t > 1e12 ? t : (t < 1e11 ? t*1000 : t);
-    return new Date(ms).toLocaleString();
+  <!-- 主腳本：完整 -->
+  <script>
+  /* ===== 共用工具 ===== */
+  const $ = (s)=>document.querySelector(s);
+  const show = (el, on=true)=> el?.classList[on?'remove':'add']('hide');
+  const setTxt = (id, v)=>{ const el=document.getElementById(id); if(el) el.textContent = (v ?? '—'); };
+  const busy   = (id,on)=>{ const el=document.getElementById(id); if(el) el.disabled = !!on; };
+  const toast  = (m)=> setTxt('predMsg', m||'');
+  const num = v => (v==null || isNaN(v)) ? null : Number(v);
+  /* ===== 代號正規化 ===== */
+  function getSymbolRaw(){ return ($('#symInput')?.value||'').trim(); }
+  function normalizeSymbol(raw){
+    let s = (raw||'').trim().toUpperCase();
+    if(!s) return '';
+    if(/^\d{4}(\.TW|\.TWO)?$/.test(s)){ if(!/\.TW|\.TWO$/.test(s)) s += '.TW'; return s; }
+    return s.replace('.', '-');
   }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
-  const x = Number(t);
-  if (!Number.isNaN(x)){
-    const ms = x > 1e12 ? x : (x < 1e11 ? x*1000 : x);
-    return new Date(ms).toLocaleString();
+  function mustSymbol(){
+    const s = normalizeSymbol(getSymbolRaw());
+    if(!s) throw new Error('請先輸入代號，如 TSLA 或 2330');
+    return s;
   }
-  const d = new Date(t);
-  return isNaN(d) ? String(t) : d.toLocaleString();
-}
 
-/* ========= 狀態 ========= */
-let currentSymbol = '';
-let currentRows   = [];
-let currentTF     = 'D';
-let rangeSel      = '6M';
-let quoteCache    = {};
-
-/* ========= 主流程 ========= */
-document.addEventListener('DOMContentLoaded', () => {
-  const theme = localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light');
-  setTheme(theme);
-  $('btnTheme').onclick = () => setTheme(isDark() ? 'light' : 'dark');
-
-  $('btnLogout').onclick = async () => { try{ await fetch(AUTH+'?action=logout', {credentials:'include'}); }catch{} showLogin(true); };
-
-  $('btnGo').onclick = () => { setSymbolFromInput(); };
-  $('inpSymbol').addEventListener('keydown', e => { if(e.key==='Enter'){ setSymbolFromInput(); } });
-  $('inpSymbol').addEventListener('input', debounce(searchSuggest, 200));
-
-  $('btnQuote').onclick   = () => refreshQuote().catch(console.error);
-  $('btnInfo').onclick    = () => loadInfo().catch(console.error);
-  $('btnUpdate').onclick  = () => updateToday().catch(console.error);
-  $('btnPredict').onclick = () => doPredict().catch(console.error);
-  $('btnPredictTarget').onclick = () => doPredictTarget().catch(console.error);
-
-
-  document.querySelectorAll('.btn-tf').forEach(b=> b.onclick = ()=>{ currentTF=b.dataset.tf; drawK(); updateTFUI(); });
-  document.querySelectorAll('.btn-range').forEach(b=> b.onclick = ()=>{ rangeSel=b.dataset.range; drawK(); updateRangeUI(); });
-  ['chkMA','chkEMA','chkBOLL','chkRSI','chkMACD'].forEach(id => $(id).onchange = () => drawK());
-
-  ensureLogin();
-
-  const last = localStorage.getItem('lastSymbol');
-  if (last){ $('inpSymbol').value = last; setSymbolFromInput(); }
-});
-
-/* ========= 登入遮罩顯示/隱藏 ========= */
-function showLogin(on){
-  cls($('loginMask'), !on, 'hide'); // on=true 顯示, on=false 關閉
-  $('lgMsg').textContent = '';
-}
-async function ensureLogin(){
-  try{
-    const r = await fetch(AUTH+'?action=whoami', {credentials:'include'});
-    const d = await r.json();
-    if(d && d.user){ $('userArea').textContent = d.user.username; showLogin(false); }
-    else{ showLogin(true); }
-  }catch{ showLogin(true); }
-}
-
-/* ========= 登入 ========= */
-$('btnDoLogin').onclick = async ()=>{
-  try{
-    const email = $('lgEmail').value.trim();
-    const pass  = $('lgPass').value.trim();
-    if(!email || !/^\d{6}$/.test(pass)){ $('lgMsg').textContent = '請輸入 Email 與 6 位數字密碼'; return; }
-
-    const r = await fetch(AUTH+'?action=login',{
-      method:'POST',
-      headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      credentials:'include',
-      body: new URLSearchParams({ username: email, password: pass })
-    });
-    const d = await r.json();
-    if(d.ok){
-      $('userArea').textContent = (d.user && d.user.username) ? d.user.username : email;
-      showLogin(false); // 無須重整
-    }else{
-      $('lgMsg').textContent = d.error || '登入失敗';
-    }
-  }catch(e){ $('lgMsg').textContent = '登入錯誤：' + String(e?.message||e); }
-};
-
-/* ========= 註冊 ========= */
-$('btnDoRegister').onclick = async ()=>{
-  try{
-    const email = $('lgEmail').value.trim();
-    const pass  = $('lgPass').value.trim();
-    if(!email || !/^\d{6}$/.test(pass)){ $('lgMsg').textContent = '密碼需為 6 位數字'; return; }
-
-    const r = await fetch(AUTH+'?action=register',{
-      method:'POST',
-      headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      credentials:'include',
-      body: new URLSearchParams({ username: email, password: pass })
-    });
-    const d = await r.json();
-    $('lgMsg').textContent = d.ok ? '註冊成功，請按登入' : (d.error || '註冊失敗');
-  }catch(e){ $('lgMsg').textContent = '註冊錯誤：' + String(e?.message||e); }
-};
-
-/* === 忘記／重設密碼（4 碼） === */
-$('btnForgot').onclick = () => {
-  $('fpEmail').value = $('lgEmail').value.trim();
-  $('fpCode').value  = '';
-  $('fpNew').value   = '';
-  $('fpMsg').textContent = '';
-  $('fpMsg').classList.remove('text-rose-600','text-emerald-600');
-  cls($('fpMask'), false, 'hide');   // 顯示重設視窗
-  cls($('loginMask'), true, 'hide'); // 關閉登入視窗，避免遮住
-};
-$('btnFPClose').onclick = () => {
-  cls($('fpMask'), true, 'hide');
-  cls($('loginMask'), false, 'hide');
-};
-$('btnSendCode').onclick = async ()=>{
-  const email = $('fpEmail').value.trim();
-  if(!email){ $('fpMsg').textContent = '請先輸入 Email'; $('fpMsg').classList.add('text-rose-600'); return; }
-  try{
-    const r = await fetch(RESET, {
-      method:'POST',
-      headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      credentials:'include',
-      body: new URLSearchParams({ action:'forgot_password', email })
-    });
-    const d = await r.json();
-    if(d.ok){
-      $('fpMsg').classList.remove('text-rose-600'); $('fpMsg').classList.add('text-emerald-600');
-      $('fpMsg').textContent = '驗證碼（測試）：' + d.code;
-    }else{
-      $('fpMsg').classList.remove('text-emerald-600'); $('fpMsg').classList.add('text-rose-600');
-      $('fpMsg').textContent = d.error || '送出失敗';
-    }
-  }catch(e){
-    $('fpMsg').classList.add('text-rose-600');
-    $('fpMsg').textContent = '錯誤：' + String(e?.message||e);
+  /* ===== 後端呼叫 ===== */
+  async function callAPI(action, payload={}){
+    const fd = new FormData();
+    fd.append('action', action);
+    for(const [k,v] of Object.entries(payload)) fd.append(k, v);
+    const r = await fetch('api.php', {method:'POST', body:fd});
+    return r.json().catch(()=>({ok:false,error:'bad_json'}));
   }
-};
-$('btnDoReset').onclick = async ()=>{
-  const email = $('fpEmail').value.trim();
-  const code  = $('fpCode').value.trim();
-  const newp  = $('fpNew').value.trim();
-  if(!email || !/^\d{4}$/.test(code) || !/^\d{6}$/.test(newp)){
-    $('fpMsg').classList.add('text-rose-600');
-    $('fpMsg').textContent = '請輸入 Email、4 位驗證碼、6 位數字新密碼';
-    return;
+  async function callAuth(action, payload={}){
+    const fd = new FormData();
+    fd.append('action', action);
+    for(const [k,v] of Object.entries(payload)) fd.append(k, v);
+    const r = await fetch('auth.php', {method:'POST', body:fd});
+    return r.json().catch(()=>({ok:false,error:'bad_json'}));
   }
-  try{
-    const r = await fetch(RESET, {
-      method:'POST',
-      headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      credentials:'include',
-      body: new URLSearchParams({ action:'reset_password', email, code, new_password:newp })
-    });
-    const d = await r.json();
-    if(d.ok){
-      $('fpMsg').classList.remove('text-rose-600'); $('fpMsg').classList.add('text-emerald-600');
-      $('fpMsg').textContent = '密碼已更新，將返回登入…';
-      setTimeout(() => {
-        cls($('fpMask'), true, 'hide');
-        cls($('loginMask'), false, 'hide');
-      }, 1200);
-    }else{
-      $('fpMsg').classList.remove('text-emerald-600'); $('fpMsg').classList.add('text-rose-600');
-      $('fpMsg').textContent = d.error || '重設失敗';
-    }
-  }catch(e){
-    $('fpMsg').classList.add('text-rose-600');
-    $('fpMsg').textContent = '錯誤：' + String(e?.message||e);
-  }
-};
 
-/* ========= 搜尋 / 報價 / 歷史 / 指標 / 畫圖 ========= */
-function normalizeSymbolFront(s){
-  let x = (s||'').toUpperCase().trim();
-  if(/^\d{4}([\-\.]?TWO?)?$/.test(x)) return x.replace(/[^0-9]/g,'') + '.TW';
-  if(x.endsWith('-TW'))  x = x.replace('-TW','.TW');
-  if(x.endsWith('-TWO')) x = x.replace('-TWO','.TWO');
-  return x;
-}
-function setSymbolFromInput(){
-  const s = $('inpSymbol').value.trim();
-  if(!s) return;
-  currentSymbol = normalizeSymbolFront(s);
-  $('inpSymbol').value = currentSymbol;
-  localStorage.setItem('lastSymbol', currentSymbol);
+  /* ===== 報價 / 公司 ===== */
+  function uiShowQuoteError(msg){ setTxt('quoteMsg', msg||'error'); }
+  function uiShowInfoError(msg){  setTxt('infoMsg',  msg||'error'); }
+  function uiShowPredError(msg){  setTxt('predMsg',  msg||'error'); }
 
-  loadInfo().catch(console.error);
-  refreshQuote().catch(console.error);
-  loadHistory().catch(console.error);
-}
-async function searchSuggest(){
-  const q = $('inpSymbol').value.trim();
-  if(q.length<2) return;
-  try{
-    const r = await fetch(API+'?action=search',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({q}) });
-    const d = await r.json();
-    const list = $('symList'); list.innerHTML = '';
-    if(d && d.ok && Array.isArray(d.items)){
-      d.items.forEach(it=>{
-        const opt = document.createElement('option');
-        opt.value = it.symbol;
-        opt.label = (it.company_name || '') + (it.industry ? (' · ' + it.industry) : '');
-        list.appendChild(opt);
-      });
-    }
-  }catch{}
-}
-/* ========= 報價 / 公司資料 / 預測 ========= */
-function quoteFromHistory(rows){
-  if(!rows?.length) return null;
-  let idx=0; for(let i=1;i<rows.length;i++){ if(new Date(rows[i].date)>new Date(rows[idx].date)) idx=i; }
-  const latest = rows[idx];
-  let prev=null, prevDate=0;
-  for(let i=0;i<rows.length;i++){
-    if(i===idx) continue;
-    const t=new Date(rows[i].date).getTime();
-    if(t>prevDate){ prevDate=t; prev=rows[i]; }
+  function renderQuote(d){
+  setTxt('quoteMsg','');
+  // 自算漲跌幅（server 沒算就前端算）
+  if ((d.changePct === null || d.changePct === undefined) && d.last != null && d.prevClose != null && d.prevClose !== 0){
+    d.changePct = Math.round(((d.last - d.prevClose) / d.prevClose) * 10000) / 100;
   }
-  const lastClose = latest.close ?? latest.adjclose ?? null;
-  const prevClose = prev?.close ?? null;
-  const pct = (lastClose!=null && prevClose!=null && prevClose!==0) ? ((lastClose-prevClose)/prevClose*100) : null;
-  return {
-    price: lastClose, pct_change: pct, volume: latest.volume ?? null, asof: latest.date,
-    open: latest.open, high: latest.high, low: latest.low, last_close: prevClose
-  };
-}
-async function refreshQuote(){
-  if(!currentSymbol) return;
-  setQuoteCard({loading:true});
-  let d=null, errNote='';
-  try{
-    const r = await fetch(API+'?action=quote_live',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
-      body: JSON.stringify({symbol:currentSymbol})
-    });
-    d = await r.json();
-  }catch(e){ d={ok:false}; errNote=String(e); }
-  if(d && d.ok){
-    quoteCache = d;
-    setQuoteCard({ price:d.price, pct_change:d.pct_change, volume:d.volume, asof:d.asof,
-      prev:d.last_close, open:d.open, high:d.high, low:d.low });
-  }else{
-    const fb = quoteFromHistory(currentRows);
-    if(fb){
-      setQuoteCard({ price:fb.price, pct_change:fb.pct_change, volume:fb.volume, asof:fb.asof,
-        prev:fb.last_close, open:fb.open, high:fb.high, low:fb.low,
-        error:(d?.error || errNote || 'no_quote') + '（已改用最近交易日）' });
-      quoteCache = fb;
-    }else{
-      setQuoteCard({ error: d?.error || errNote || '讀取失敗' });
-    }
+  const box = $('#quoteBox'); if(!box) return;
+  box.innerHTML =
+    `最新價：${d.last??'—'}　漲跌幅：${d.changePct??'—'}　成交量：${d.volume??'—'}<br/>
+     昨收：${d.prevClose??'—'}　開盤：${d.open??'—'}　最高：${d.high??'—'}　最低：${d.low??'—'}`;
+  if(d.ohlc && d.ohlc.length){
+    const x=d.ohlc.map(o=>o.date), o=d.ohlc.map(o=>o.open), h=d.ohlc.map(o=>o.high), l=d.ohlc.map(o=>o.low), c=d.ohlc.map(o=>o.close);
+    Plotly.newPlot('kchart', [{x,open:o,high:h,low:l,close:c,type:'candlestick'}],
+                   {margin:{t:20,r:10,l:40,b:30}}, {displayModeBar:false});
   }
 }
-function setQuoteCard({price,pct_change,volume,asof,prev,open,high,low,loading,error}){
-  $('qPrice').textContent = loading ? '讀取中…' : fmtNum(price, 4);
-  $('qPct').textContent   = loading ? '—' : fmtPct(pct_change);
-  $('qVol').textContent   = loading ? '—' : (volume==null?'—':Number(volume).toLocaleString());
-  $('qTime').textContent  = loading ? '—' : toLocalTime(asof);
-  $('qPrev').textContent  = prev==null ? '—' : fmtNum(prev,4);
-  $('qOpen').textContent  = open==null ? '—' : fmtNum(open,4);
-  $('qHigh').textContent  = high==null ? '—' : fmtNum(high,4);
-  $('qLow').textContent   = low==null  ? '—' : fmtNum(low,4);
-  $('qNote').textContent  = error ? ('提示：'+error) : '';
-}
-async function loadInfo(){
-  if(!currentSymbol) return;
-  try{
-    const r = await fetch(API+'?action=info',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
-      body: JSON.stringify({symbol:currentSymbol})
-    });
-    const d = await r.json();
-    if(r.ok && d.ok && d.info){
-      const i = d.info;
-      const has = (i.company_name||i.industry||i.market_cap!=null||i.pe!=null||i.dividend_yield!=null);
-      if(has){
-        $('iName').textContent     = i.company_name || '—';
-        $('iIndustry').textContent = i.industry || '—';
-        $('iMktcap').textContent   = i.market_cap!=null ? fmtNum(i.market_cap) : '—';
-        $('iPE').textContent       = i.pe!=null ? Number(i.pe).toFixed(2) : '—';
-        $('iDY').textContent       = i.dividend_yield!=null ? (i.dividend_yield*100).toFixed(2)+'%' : '—';
-        return;
-      }
+
+  function renderInfo(d){
+    setTxt('infoMsg','');
+    const box = $('#infoBox'); if(!box) return;
+    box.innerHTML =
+      `名稱：${d.company_name||'—'}　產業：${d.industry||'—'}<br/>
+       市值：${d.market_cap||'—'}　PE：${d.pe||'—'}　股利：${d.dividend_per_share||'—'} / ${d.dividend_yield||'—'}`;
+  }
+
+  /* ===== K 線 ===== */
+  async function drawHistory(sym){
+    const j = await callAPI('history',{symbol:sym});
+    if(!j.ok || !j.data || !j.data.ohlc || !j.data.ohlc.length){
+      toast('查無歷史資料，請先按「更新到最新日K」'); return;
     }
-  }catch{}
-  try{
-    const r2 = await fetch(API+'?action=search',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
-      body: JSON.stringify({q: currentSymbol})
-    });
-    const d2 = await r2.json();
-    if(d2?.ok && Array.isArray(d2.items)){
-      const found = d2.items.find(it => (it.symbol||'').toUpperCase() === currentSymbol.toUpperCase());
-      if(found){
-        $('iName').textContent     = found.company_name || '—';
-        $('iIndustry').textContent = found.industry || '—';
-      }
+    const arr = j.data.ohlc;
+    const x = arr.map(o=>o.date);
+    const o = arr.map(o=>o.open), h=arr.map(o=>o.high), l=arr.map(o=>o.low), c=arr.map(o=>o.close);
+    Plotly.newPlot('kchart',
+      [{x,open:o,high:h,low:l,close:c,type:'candlestick'}],
+      {margin:{t:20,r:10,l:40,b:30}}, {displayModeBar:false});
+  }
+
+  /* ===== 預測區（固定欄位） ===== */
+  function clearPredictArea(){
+    setTxt('pred_method','—'); setTxt('pred_next','—');
+    setTxt('pred_suggest','—'); setTxt('pred_reason','—');
+    setTxt('pred_target','—'); setTxt('pred_target_conf','—');
+    setTxt('signal_advice','—'); setTxt('signal_why','—'); setTxt('signal_days','—');
+    setTxt('risk_var95','—'); setTxt('risk_atr','—'); setTxt('risk_kelly20','—');
+    toast('');
+  }
+  function renderPredict(d){
+    const method = d?.method || d?.algo || '—';
+    const pred   = num(d?.next_close_pred);
+    const last   = num(d?.last_close);
+    const parts  = d?.components && typeof d.components==='object' ? d.components : null;
+
+    // —— 建議：用預測與昨收的相對變化自動判斷（閾值可調）
+    let advice = '—';
+    let reason = 'RF/LR/Ridge 混合';
+    if (pred!=null && last!=null && last!==0){
+    const chg = (pred - last) / last;          // 相對漲跌
+    const up = 0.008, dn = -0.008;             // 0.8% 閾值（你想更保守可改 1%）
+    advice = chg > up ? '偏多' : (chg < dn ? '偏空' : '觀望');
+    reason = `預測相對昨收 ${ (chg*100).toFixed(2) }%；${reason}`;
+  }
+    let confTxt = '—';
+  if (parts){
+    const vals = Object.values(parts).map(num).filter(v=>v!=null);
+    if (vals.length >= 2 && pred!=null){
+      const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
+      const variance = vals.reduce((a,b)=>a+(b-mean)**2,0)/vals.length;
+      const std = Math.sqrt(variance);
+      // 將「分散 / 價格」映射到 0–100 分，數學係數可按口味微調
+      const cv = std / Math.max(1, Math.abs(pred));   // 變異係數
+      let conf = Math.max(0, 100 - Math.min(100, cv * 4000)); // 4000 是縮放係數
+      confTxt = `${conf.toFixed(0)}%`;
     }
-  }catch{}
+  }
+
+  // —— 寫入畫面
+  setTxt('pred_method', method);
+  setTxt('pred_next',   pred!=null ? pred : '—');
+  setTxt('pred_suggest', advice);
+  setTxt('pred_reason',  reason);
+  // 「信心」屬於目標價那一列，這裡不動；若你想把這個信心也顯示在目標價那行，可在 renderTarget 內備援套用。
+  toast('');
 }
-async function doPredict(){
-  if(!currentSymbol) return;
-  const r = await fetch(API+'?action=predict',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
-    body: JSON.stringify({symbol:currentSymbol})
+function renderTarget(d){
+  // 後端可能回這些鍵名
+  const tech = num(d?.tech_target);
+  const val  = num(d?.val_target);
+  const sug  = num(d?.suggested_target);
+  const last = num(d?.last_close);
+  // —— 顯示的目標價：優先 suggested，其次 tech，再 val
+  const target = (sug??tech??val);
+  setTxt('pred_target', target!=null ? target : '—');
+
+  // —— 信心：用「技術面 vs 估值面」的一致性估計（差距越小越有信心）
+  // 若 tech/val 兩者皆有，用 |tech - val| 與基準（取 last 或 target）比；否則用「target 與 last」距離粗估。
+  let confTxt = '—';
+  if (tech!=null && val!=null){
+    const base = (last!=null && last>0) ? last : Math.max(1, Math.abs(target||0));
+    const gap  = Math.abs(tech - val) / base;                 // 差距占比
+    let conf = Math.max(0, 100 - Math.min(100, gap * 120));   // 120 為縮放係數，可調
+    confTxt = `${conf.toFixed(0)}%`;
+  } else if (target!=null && last!=null && last>0){
+    // 只有一個面：距離越小，信心越保守
+    const dist = Math.abs(target - last) / last;
+    let conf = Math.max(0, 100 - Math.min(100, dist * 200));  // 200 為縮放係數，可調
+    confTxt = `${conf.toFixed(0)}%`;
+  }
+
+  setTxt('pred_target_conf', confTxt);
+  toast('');
+}
+  function renderSignal(d){
+  // trade_signal.py：bias / setup / summary / timeframe_days :contentReference[oaicite:5]{index=5}
+    const advice = [d?.bias, d?.setup].filter(Boolean).join(' / ');
+    setTxt('signal_advice', advice || '—');
+    setTxt('signal_why',    d?.summary ?? (d?.reasons?.join('；') || '—'));
+    setTxt('signal_days',   d?.timeframe_days ?? '—');
+    toast('');
+  }
+  function renderRisk(d){
+  // risk_engine.py：risk.var95_daily（報酬率，顯示%）、risk.atr14、plan.kelly_fraction_cap20pct :contentReference[oaicite:6]{index=6}
+    const varDaily = d?.risk?.var95_daily;
+    setTxt('risk_var95',  (varDaily!=null) ? (Math.round(varDaily*10000)/100 + '%') : '—');
+    setTxt('risk_atr',    d?.risk?.atr14 ?? '—');
+    const kelly = d?.plan?.kelly_fraction_cap20pct;
+    setTxt('risk_kelly20', (kelly!=null) ? (Math.round(kelly*1000)/10 + '%') : '—');
+    toast('');
+  }
+
+  /* ===== 按鈕事件 ===== */
+  document.getElementById('btnQuote')?.addEventListener('click', async()=>{
+    try{
+      const sym = mustSymbol();
+      const j = await callAPI('quote_live', {symbol:sym});
+      if(!j.ok) return uiShowQuoteError(j.error);
+      renderQuote(j.data);
+      if(!j.data?.ohlc?.length){ await drawHistory(sym); }
+    }catch(e){ uiShowQuoteError(e.message); }
   });
-  const d = await r.json();
-  if(r.ok && d.ok){
-    $('pMethod').textContent = d.method || '—';
-    $('pLast').textContent   = (d.last_close_date ? d.last_close_date + ' ' : '') + (d.last_close ?? '');
-    $('pNext').textContent   = d.pred_close ?? '—';
-  }else{
-    $('pMethod').textContent = '—';
-    $('pLast').textContent   = '—';
-    $('pNext').textContent   = '失敗';
-  }
-}
-async function doPredictTarget(){
-  if(!currentSymbol) return;
-  const r = await fetch(API+'?action=predict_target', {
-    method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
-    body: JSON.stringify({symbol:currentSymbol, horizon:20})
+  document.getElementById('btnInfo')?.addEventListener('click', async()=>{
+    try{
+      const sym = mustSymbol();
+      const j = await callAPI('info', {symbol:sym});
+      if(!j.ok) return uiShowInfoError(j.error);
+      renderInfo(j.data);
+    }catch(e){ uiShowInfoError(e.message); }
   });
-  const d = await r.json();
-  if(r.ok && d.ok){
-    $('pMethodTarget').textContent = (d.method || 'target_model');
-    $('pHorizon').textContent      = (d.horizon_days || 20) + ' 日';
-    $('pTech').textContent         = d.tech_target != null ? d.tech_target : '—';
-    $('pVal').textContent          = d.val_target  != null ? d.val_target  : '—';
-    $('pSuggest').textContent      = d.suggested_target != null ? d.suggested_target : (d.tech_target ?? '—');
-  }else{
-    $('pMethodTarget').textContent = '—';
-    $('pHorizon').textContent      = '—';
-    $('pTech').textContent         = '—';
-    $('pVal').textContent          = '—';
-    $('pSuggest').textContent      = d?.error || '失敗';
-  }
-}
-
-/* ========= 歷史 / 指標 / 畫圖 ========= */
-async function loadHistory(){
-  if(!currentSymbol) return;
-  try{
-    let r = await fetch(API+'?action=history',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
-      body: JSON.stringify({symbol:currentSymbol,limit:360})
-    });
-    let d = await r.json();
-    let rows = (d && d.ok && Array.isArray(d.rows)) ? d.rows : [];
-    if(!rows.length){
-      await fetch(API+'?action=update_today',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
-        body: JSON.stringify({symbol:currentSymbol})
-      });
-      r = await fetch(API+'?action=history',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
-        body: JSON.stringify({symbol:currentSymbol,limit:360})
-      });
-      d = await r.json();
-      rows = (d && d.ok && Array.isArray(d.rows)) ? d.rows : [];
-    }
-    currentRows = rows;
-    if(!currentRows.length){
-      $('kchart').innerHTML = '<div class="p-4 text-sm text-slate-500">查無歷史資料，請按「更新到最新日K」再試。</div>';
-      return;
-    }
-    fillHistory(currentRows);
-    drawK(true);
-
-    const fb = quoteFromHistory(currentRows);
-    if(fb && (!quoteCache || !quoteCache.price)){
-      setQuoteCard({
-        price:fb.price, pct_change:fb.pct_change, volume:fb.volume, asof:fb.asof,
-        prev:fb.last_close, open:fb.open, high:fb.high, low:fb.low,
-        error:'即時來源暫不可用（已用最近交易日）'
-      });
-      quoteCache = fb;
-    }
-  }catch(e){
-    $('kchart').innerHTML = '<div class="p-4 text-sm text-rose-500">讀取歷史資料失敗：'+ (e?.message||e) +'</div>';
-  }
-}
-function fillHistory(rows){
-  rows.forEach(r=>{
-    if(r.open==null)  r.open  = r.close;
-    if(r.high==null)  r.high  = r.close;
-    if(r.low==null)   r.low   = r.close;
+  document.getElementById('btnUpdate')?.addEventListener('click', async()=>{
+    try{
+      const sym = mustSymbol();
+      const j = await callAPI('update_today', {symbol:sym});
+      if(!j.ok) return uiShowPredError(j.error);
+      await drawHistory(sym);
+      toast('已回填並更新 K 線');
+    }catch(e){ uiShowPredError(e.message); }
   });
-}
-function resample(rows, tf){
-  if(tf==='D') return rows.slice();
-  const out = {};
-  for(const r of rows){
-    const d = new Date(r.date);
-    let key;
-    if(tf==='W'){
-      const wd = (d.getDay()+6)%7; const monday = new Date(d); monday.setDate(d.getDate()-wd);
-      key = monday.toISOString().slice(0,10);
+  async function doPredict(){
+    const sym = mustSymbol();
+    busy('btnPredict',true); toast('計算中…');
+    const j = await callAPI('predict_next', {symbol:sym});
+    busy('btnPredict',false);
+    if(!j.ok){ toast(j.error||'predict_failed'); return; }
+    renderPredict(j.data);
+  }
+  async function doTarget(){
+    const sym = mustSymbol();
+    busy('btnTarget', true); toast('計算中…');
+    const j = await callAPI('predict_target', {symbol:sym, horizon:40});
+    busy('btnTarget', false);
+    if(!j.ok){ toast(j.error||'predict_target_failed'); return; }
+    renderTarget(j.data);
+  }
+  async function doSignal(){
+    const sym = mustSymbol();
+    busy('btnSignal', true); toast('分析中…');
+    const j = await callAPI('signal', {symbol:sym});
+    busy('btnSignal', false);
+    if(!j.ok){ toast(j.error||'signal_failed'); return; }
+    renderSignal(j.data);
+  }
+
+  async function doRisk(){
+    const sym = mustSymbol();
+    busy('btnRisk', true); toast('分析中…');
+    const j = await callAPI('risk', {symbol:sym, horizon:20});
+    busy('btnRisk', false);
+    if(!j.ok){ toast(j.error||'predict_risk_failed'); return; }
+    renderRisk(j.data);
+  }
+  document.getElementById('btnPredict')?.addEventListener('click', doPredict);
+  document.getElementById('btnTarget') ?.addEventListener('click', doTarget);
+  document.getElementById('btnSignal') ?.addEventListener('click', doSignal);
+  document.getElementById('btnRisk')   ?.addEventListener('click', doRisk);
+
+  /* ===== 登入 / 註冊 / 重設 ===== */
+  function updateLoginUI(user){
+    if(user){
+      $('#loginUser').textContent = user.username;
+      show($('#btnLogout'), true); show($('#btnLoginOpen'), false); show($('#loginMask'), false);
     }else{
-      key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-01';
+      $('#loginUser').textContent = '';
+      show($('#btnLogout'), false); show($('#btnLoginOpen'), true);
     }
-    const o = out[key] || (out[key]={date:key, open:r.open, high:r.high, low:r.low, close:r.close, volume:0});
-    o.high   = Math.max(num(o.high), num(r.high));
-    o.low    = Math.min(num(o.low),  num(r.low));
-    o.open   = r.open;
-    o.close  = o.close ?? r.close;
-    o.volume += (r.volume||0);
   }
-  return Object.values(out).sort((a,b)=> new Date(b.date)-new Date(a.date));
-}
-function SMA(arr, n){
-  const out = new Array(arr.length).fill(NaN); let sum=0, q=[];
-  for(let i=0;i<arr.length;i++){
-    const v = Number.isFinite(arr[i])?arr[i]:NaN;
-    q.push(v); if(Number.isFinite(v)) sum+=v;
-    if(q.length>n){ const old=q.shift(); if(Number.isFinite(old)) sum-=old; }
-    if(q.length===n && q.every(Number.isFinite)) out[i]=sum/n;
-  } return out;
-}
-function EMA(arr, n){
-  const out = new Array(arr.length).fill(NaN); const k = 2/(n+1); let prev;
-  for(let i=0;i<arr.length;i++){
-    const v = arr[i];
-    if(!Number.isFinite(v)) { out[i]=Number.isFinite(prev)?prev:NaN; continue; }
-    prev = prev==null ? v : v*k + prev*(1-k); out[i] = prev;
-  } return out;
-}
-function RSI(close, n=14){
-  const out = new Array(close.length).fill(NaN); let avgU=0, avgD=0;
-  for(let i=1;i<close.length;i++){
-    const ch = close[i]-close[i-1]; const u = Math.max(ch,0), d = Math.max(-ch,0);
-    if(i<=n){ avgU+=u; avgD+=d; if(i===n){ avgU/=n; avgD/=n; const rs=avgU/(avgD||1e-9); out[i]=100-(100/(1+rs)); } }
-    else{ avgU=(avgU*(n-1)+u)/n; avgD=(avgD*(n-1)+d)/n; const rs=avgU/(avgD||1e-9); out[i]=100-(100/(1+rs)); }
-  } return out;
-}
-function MACD(close, a=12, b=26, s=9){
-  const emaA = EMA(close,a), emaB = EMA(close,b);
-  const macd = emaA.map((v,i)=> (Number.isFinite(v)&&Number.isFinite(emaB[i])) ? v-emaB[i] : NaN);
-  const signal = EMA(macd, s); return { macd, signal };
-}
-function BOLL(close, n=20, k=2){
-  const ma = SMA(close,n); const U = new Array(close.length).fill(NaN); const L = new Array(close.length).fill(NaN);
-  for(let i=0;i<close.length;i++){
-    if(i+1<n || !Number.isFinite(ma[i])) continue;
-    let sum=0, sum2=0;
-    for(let j=i-n+1;j<=i;j++){ const v = close[j]; if(!Number.isFinite(v)){ sum=null; break; } sum+=v; sum2+=v*v; }
-    if(sum==null) continue;
-    const mean = ma[i]; const variance = sum2/n - (mean*mean); const sd = Math.sqrt(Math.max(variance,0));
-    U[i]=mean+k*sd; L[i]=mean-k*sd;
-  } return { upper:U, lower:L };
-}
-function drawK(isFirst=false){
-  if(!currentRows || !currentRows.length){
-    $('kchart').innerHTML = '<div class="p-4 text-sm text-slate-500">沒有可畫的資料</div>';
-    return;
-  }
-  let rows = resample(currentRows, currentTF);
-  if(rangeSel!=='MAX'){
-    const map={ '3M':65,'6M':130,'1Y':260,'2Y':520 };
-    rows = rows.slice(0, map[rangeSel] || rows.length);
-  }
-  const asc=[...rows].reverse();
-  const x     = asc.map(r=>r.date);
-  const open  = asc.map(r=> num(r.open,  num(r.close)));
-  const high  = asc.map(r=> num(r.high,  num(r.close)));
-  const low   = asc.map(r=> num(r.low,   num(r.close)));
-  const close = asc.map(r=> num(r.close, NaN));
-  const vol   = asc.map(r=> num(r.volume,0));
+  $('#btnLoginOpen')?.addEventListener('click', ()=> show($('#loginMask'), true));
+  $('#btnCloseLogin')?.addEventListener('click', ()=> show($('#loginMask'), false));
+  $('#btnLogout')?.addEventListener('click', async()=>{ await fetch('auth.php?action=logout'); updateLoginUI(null); });
 
-  const traces = [{type:'candlestick', x, open, high, low, close, yaxis:'y', name:'K'}];
-  if($('chkMA').checked){ [5,10,20,60].forEach(n=> traces.push({type:'scatter',mode:'lines',x, y:SMA(close,n), yaxis:'y', name:'MA'+n, line:{width:1.2}})); }
-  if($('chkEMA').checked){ [12,26].forEach(n=> traces.push({type:'scatter',mode:'lines',x, y:EMA(close,n), yaxis:'y', name:'EMA'+n, line:{width:1.2}})); }
-  if($('chkBOLL').checked){
-    const bb=BOLL(close,20,2);
-    traces.push({type:'scatter',mode:'lines',x,y:bb.upper,yaxis:'y',name:'BOLL上',line:{width:1}});
-    traces.push({type:'scatter',mode:'lines',x,y:bb.lower,yaxis:'y',name:'BOLL下',line:{width:1}});
-  }
-  const rsi  = RSI(close,14);
-  const macd = MACD(close,12,26,9);
-  traces.push({type:'bar', x, y:vol,          xaxis:'x', yaxis:'y2', name:'量',     opacity:0.5});
-  traces.push({type:'scatter', mode:'lines', x, y:rsi,        xaxis:'x', yaxis:'y3', name:'RSI(14)',  visible: $('chkRSI').checked  ? true : 'legendonly'});
-  traces.push({type:'scatter', mode:'lines', x, y:macd.macd,  xaxis:'x', yaxis:'y4', name:'MACD',     visible: $('chkMACD').checked ? true : 'legendonly'});
-  traces.push({type:'scatter', mode:'lines', x, y:macd.signal,xaxis:'x', yaxis:'y4', name:'Signal',   visible: $('chkMACD').checked ? true : 'legendonly'});
-
-  const dark = isDark();
-  const layout = {
-    margin:{l:50,r:160,t:20,b:30},
-    xaxis:{rangeslider:{visible:false}, showgrid:false},
-    yaxis:{domain:[0.55,1.0], title:'價格'},
-    xaxis2:{matches:'x', showgrid:false},
-    yaxis2:{domain:[0.48,0.55], title:'量'},
-    yaxis3:{domain:[0.30,0.45], title:'RSI'},
-    yaxis4:{domain:[0.05,0.28], title:'MACD'},
-    legend:{x:1.02, y:1, orientation:'v'},
-    dragmode:'pan',
-    hovermode:'x unified',
-    paper_bgcolor: dark ? '#0f172a' : '#ffffff',
-    plot_bgcolor:  dark ? '#0f172a' : '#ffffff',
-    font:{color:   dark ? '#e2e8f0' : '#0f172a'}
-  };
-  const config = {displayModeBar:true, responsive:true};
-  const el = $('kchart');
-  if(isFirst || !el.dataset.inited){ Plotly.newPlot(el, traces, layout, config); el.dataset.inited='1'; }
-  else{ Plotly.react(el, traces, layout, config); }
-}
-window.addEventListener('resize', ()=>{ try{ Plotly.Plots.resize($('kchart')); }catch{} });
-
-/* ========= 其它 ========= */
-async function updateToday(){
-  if(!currentSymbol) return;
-  await fetch(API+'?action=update_today',{ method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
-    body: JSON.stringify({symbol:currentSymbol})
+  $('#btnLogin')?.addEventListener('click', async()=>{
+    const u=$('#lgUser').value.trim(), p=$('#lgPass').value.trim();
+    const j = await callAuth('login',{username:u,password:p});
+    if(!j.ok){ setTxt('lgMsg', j.error||'login_failed'); return; }
+    setTxt('lgMsg',''); updateLoginUI(j.user);
   });
-  await loadHistory();
-  await refreshQuote();
-}
-function setTheme(mode){
-  if(mode==='dark') document.documentElement.classList.add('dark');
-  else document.documentElement.classList.remove('dark');
-  localStorage.setItem('theme', mode);
-  drawK();
-}
-function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
-function num(v, fb){ const n = (v==null||v==='')?NaN:+v; return Number.isFinite(n)?n:(fb??NaN); }
-</script>
+  $('#btnRegister')?.addEventListener('click', async()=>{
+    const u=$('#lgUser').value.trim(), p=$('#lgPass').value.trim();
+    const j = await callAuth('register',{username:u,password:p});
+    setTxt('lgMsg', j.ok ? '註冊成功，請按登入' : (j.error||'register_failed'));
+  });
+  $('#btnForgot')?.addEventListener('click', ()=>{
+    $('#fpEmail').value = $('#lgUser').value.trim(); $('#fpCode').value=''; $('#fpNew').value='';
+    setTxt('fpMsg',''); show($('#fpMask'), true); show($('#loginMask'), false);
+  });
+  $('#btnFPClose')?.addEventListener('click', ()=>{ show($('#fpMask'), false); show($('#loginMask'), true); });
+  $('#btnSendCode')?.addEventListener('click', async()=>{
+    const email=$('#fpEmail').value.trim();
+    const j = await callAuth('forgot_password',{email});
+    setTxt('fpMsg', j.ok ? `驗證碼（測試用）：${j.code}` : (j.error||'failed'));
+  });
+  $('#btnResetPwd')?.addEventListener('click', async()=>{
+    const email=$('#fpEmail').value.trim(), code=$('#fpCode').value.trim(), newp=$('#fpNew').value.trim();
+    const j = await callAuth('reset_password',{email,code,new_password:newp});
+    setTxt('fpMsg', j.ok ? '已重設，請回登入' : (j.error||'failed'));
+  });
+
+  /* ===== 開站自檢 ===== */
+  (async()=>{
+    try{
+      const w = await fetch('auth.php?action=whoami').then(r=>r.json());
+      updateLoginUI(w?.user||null);
+      await fetch('api.php?action=diag').then(r=>r.json());
+    }catch{}
+  })();
+  </script>
 </body>
 </html>

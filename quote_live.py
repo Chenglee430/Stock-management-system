@@ -1,104 +1,105 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 import sys, json, warnings
+from datetime import datetime, timedelta, timezone
+import pandas as pd
 import yfinance as yf
-from datetime import datetime, timezone
 
+warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore")
 
-def norm(sym: str) -> str:
-    s = (sym or '').strip().upper()
+def normalize(sym: str) -> str:
+    s = (sym or "").strip().upper()
     if not s: return s
-    if s.isdigit() and len(s) == 4:  # 台股
-        return s + ".TW"
-    return s.replace('.', '-')       # 美股 BRK.B -> BRK-B
+    if s.isdigit() and len(s)==4 and not s.endswith(".TW") and not s.endswith(".TWO"):
+        s = s + ".TW"
+    return s
 
-def safe_float(x):
-    try:
-        return float(x)
-    except Exception:
-        return None
+def safe_get_fast(info, keys):
+    for k in keys:
+        v = info.get(k)
+        if v is not None:
+            return v
+    return None
 
-def to_iso(ts):
-    # yfinance fast_info 的時間可能是 unix 秒數或 pandas Timestamp
-    if ts is None: return None
-    try:
-        if isinstance(ts, (int, float)):
-            return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
-        # pandas/np datetime
-        return str(ts)
-    except Exception:
-        return str(ts)
-
-if __name__=='__main__':
+def main():
     if len(sys.argv) < 2:
-        print(json.dumps({'error':'no_symbol'})); sys.exit(0)
-
-    sym = norm(sys.argv[1])
-
-    out = {
-        'symbol': sym, 'price': None, 'volume': None, 'asof': None,
-        'last_close': None, 'pct_change': None,
-        'open': None, 'high': None, 'low': None
-    }
+        print(json.dumps({"error":"need_symbol"})); return
+    raw = sys.argv[1]
+    sym = normalize(raw)
 
     try:
-        t = yf.Ticker(sym)
+        tk = yf.Ticker(sym)
 
-        # -------- 1) 先嘗試 fast_info（最快） --------
-        fi = getattr(t, 'fast_info', None) or {}
-        price  = fi.get('last_price') or fi.get('lastPrice')
-        volume = fi.get('last_volume') or fi.get('volume')
-        ctime  = fi.get('last_timestamp') or fi.get('regular_market_time')
+        # 先用 fast_info（比 info 穩定、速度快）
+        fi = getattr(tk, "fast_info", {}) or {}
+        last = safe_get_fast(fi, ["lastPrice","regularMarketPrice","last_price"])
+        prev = safe_get_fast(fi, ["previousClose","regularMarketPreviousClose"])
+        opn  = safe_get_fast(fi, ["open","regularMarketOpen"])
+        high = safe_get_fast(fi, ["dayHigh","regularMarketDayHigh"])
+        low  = safe_get_fast(fi, ["dayLow","regularMarketDayLow"])
+        vol  = safe_get_fast(fi, ["lastVolume","volume","regularMarketVolume"])
 
-        out['price']  = safe_float(price)
-        out['volume'] = int(volume) if volume is not None else None
-        out['asof']   = to_iso(ctime)
+        # 如果 fast_info 拿不到，就用 history 補
+        h = tk.history(period="5d", interval="1d", auto_adjust=False)  # 5天用來保底 prev
+        h = h.reset_index().rename(columns={
+            "Date":"date","Open":"open","High":"high","Low":"low",
+            "Close":"close","Adj Close":"adj","Volume":"volume"
+        })
+        if not last and not h.empty:
+            # 以最新一根 close 當 last（休市時也可）
+            last = float(h.iloc[-1]["close"])
+        if not prev and len(h) >= 2:
+            prev = float(h.iloc[-2]["close"])
+        if not opn and not h.empty:
+            opn = float(h.iloc[-1]["open"])
+        if not high and not h.empty:
+            high = float(h.iloc[-1]["high"])
+        if not low and not h.empty:
+            low = float(h.iloc[-1]["low"])
+        if not vol and not h.empty:
+            vol = int(h.iloc[-1]["volume"]) if pd.notna(h.iloc[-1]["volume"]) else None
 
-        # -------- 2) 以最近 2 根日K 做完整補齊：昨收 + (當日)開/高/低/量 --------
-        hist = t.history(period='2d', interval='1d', auto_adjust=False)
-        if hist is not None and not hist.empty:
-            # 取最後一根（可能是今天尚未收盤的日K）
-            last = hist.iloc[-1]
-            # 前一根 → 作為昨收
-            if len(hist) >= 2:
-                prev = hist.iloc[-2]
-                out['last_close'] = safe_float(prev.get('Close'))
+        # 給前端畫K線：最近 ~200 根（避免太大）
+        hfull = tk.history(period="1y", interval="1d", auto_adjust=False)
+        ohlc = []
+        if not hfull.empty:
+            hf = hfull.reset_index().rename(columns={
+                "Date":"date","Open":"open","High":"high","Low":"low",
+                "Close":"close","Adj Close":"adj","Volume":"volume"
+            })
+            # 用調整後收盤覆蓋 close（若有）
+            if "adj" in hf.columns:
+                hf["close"] = hf["adj"].where(hf["adj"].notna(), hf["close"])
+            for _, r in hf.tail(220).iterrows():
+                ohlc.append({
+                    "date": r["date"].strftime("%Y-%m-%d") if isinstance(r["date"], (pd.Timestamp, datetime)) else str(r["date"]),
+                    "open": float(r["open"]) if pd.notna(r["open"]) else None,
+                    "high": float(r["high"]) if pd.notna(r["high"]) else None,
+                    "low":  float(r["low"])  if pd.notna(r["low"])  else None,
+                    "close":float(r["close"])if pd.notna(r["close"])else None,
+                    "volume": int(r["volume"]) if pd.notna(r["volume"]) else None
+                })
 
-            # 若即時價缺，拿最後一根的 Close（若為今日盤中則是盤中 close）
-            if out['price'] is None:
-                out['price'] = safe_float(last.get('Close'))
+        # 組裝
+        changePct = None
+        if last is not None and prev is not None and prev != 0:
+            changePct = round((float(last) - float(prev)) / float(prev) * 100, 2)
 
-            # 補齊開高低量
-            o = safe_float(last.get('Open'))
-            h = safe_float(last.get('High'))
-            l = safe_float(last.get('Low'))
-            v = last.get('Volume')
-            out['open']  = o if o is not None else out['open']
-            out['high']  = h if h is not None else out['high']
-            out['low']   = l if l is not None else out['low']
-            if out['volume'] is None and v is not None:
-                try: out['volume'] = int(v)
-                except: pass
-
-            # 若 fast_info 沒給時間，用最後一根 K 線時間
-            if out['asof'] is None:
-                try:
-                    idx = hist.index[-1]
-                    out['asof'] = str(idx.to_pydatetime().astimezone(timezone.utc).isoformat())
-                except Exception:
-                    out['asof'] = str(hist.index[-1])
-
-            # 計算 % 變動
-            if out['pct_change'] is None and out['price'] is not None and out['last_close']:
-                try:
-                    prev = float(out['last_close'])
-                    if prev != 0:
-                        out['pct_change'] = (float(out['price']) - prev) / prev * 100.0
-                except Exception:
-                    pass
-
+        out = {
+            "symbol": sym,
+            "last": float(last) if last is not None else None,
+            "prevClose": float(prev) if prev is not None else None,
+            "open": float(opn) if opn is not None else None,
+            "high": float(high) if high is not None else None,
+            "low":  float(low) if low is not None else None,
+            "volume": int(vol) if vol is not None else None,
+            "changePct": changePct,
+            "ohlc": ohlc
+        }
         print(json.dumps(out, ensure_ascii=False))
     except Exception as e:
-        print(json.dumps({'error': str(e)}))
+        print(json.dumps({"error":"quote_exception","msg":str(e)}, ensure_ascii=False))
+
+if __name__ == "__main__":
+    main()

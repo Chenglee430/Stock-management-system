@@ -1,10 +1,37 @@
 <?php
 // ===== 基本設定 =====
-$DB_HOST = 'localhost';
-$DB_USER = 'root';
-$DB_PASS = '';
-$DB_NAME = 'stock_db';
-$DB_CHARSET = 'utf8mb4';
+
+error_reporting(E_ALL);
+ini_set('display_errors', 0);              // 網頁不顯示錯誤
+ini_set('log_errors', 1);
+ini_set('error_log', __DIR__ . '/logs/php_error.log');
+
+define('DB_HOST', '127.0.0.1');
+define('DB_PORT', 3306);
+define('DB_NAME', 'stock_db');
+define('DB_USER', 'stockapp');
+define('DB_PASS', '920430');
+
+try {
+  $pdo = new PDO(
+    'mysql:host='.DB_HOST.';port='.DB_PORT.';dbname='.DB_NAME.';charset=utf8mb4',
+    DB_USER,
+    DB_PASS,
+    [
+      PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+      PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+      PDO::ATTR_TIMEOUT            => 3,                     // 3 秒連線/等待
+    ]
+  );
+} catch (Throwable $e) {
+  // 寫 Log，API 可以回 db_connect_failed
+  error_log('[DB_CONNECT_FAIL] '.$e->getMessage());
+  http_response_code(500);
+  echo 'db_connect_failed';
+  exit;
+}
+
+
 
 // Python（若 exec 可用）
 $PYTHON      = 'python';

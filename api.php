@@ -1,223 +1,181 @@
 <?php
-require_once __DIR__.'/config.php';
+// api.php — 修正版（含 history 純 PHP 版）
+declare(strict_types=1);
+header('Content-Type: application/json; charset=utf-8');
+session_start();
 
-// DB 可能未建；失敗也不要中斷
-$pdo = null; try{ $pdo = db(); }catch(Exception $e){ $pdo=null; }
-
-$action = $_GET['action'] ?? '';
-$BODY = json_decode(file_get_contents('php://input'), true) ?: [];
-
-function rows_to_history($rows){
-  $out=[]; foreach($rows as $r){
-    $out[]=[
-      'date'=>$r['date'],
-      'open'=>is_null($r['open'])?null:(float)$r['open'],
-      'high'=>is_null($r['high'])?null:(float)$r['high'],
-      'low' =>is_null($r['low']) ?null:(float)$r['low'],
-      'close'=>is_null($r['close'])?null:(float)$r['close'],
-      'volume'=>is_null($r['volume'])?null:(int)$r['volume'],
-    ];
-  }
-  return array_reverse($out); // 新→舊
-}
-
-function get_company_info_safe($sym){
-  global $PYTHON,$PY_INFO,$pdo;
-  if(exec_available()){
-    [$ret,$d] = shell_json(escapeshellcmd("$PYTHON \"{$PY_INFO}\" ".escapeshellarg($sym)));
-    if(!empty($d) && empty($d['error'])) return $d;
-  }
-  $d = y_info($sym);
-  if(empty($d['error'])) return $d;
-  if($pdo){
-    $st=$pdo->prepare("SELECT MAX(company_name) AS company_name, MAX(industry) AS industry FROM stock_data WHERE symbol IN (?, REPLACE(?, '.TW',''))");
-    $st->execute([$sym,$sym]); $r=$st->fetch();
-    return ['symbol'=>$sym,'company_name'=>$r['company_name']??null,'industry'=>$r['industry']??null];
-  }
-  return ['symbol'=>$sym];
-}
-
-// 不強制登入，避免因 session/CORS 造成整站失效
-if($action==='health'){ json_out(['ok'=>true,'exec'=>exec_available(),'db'=>$GLOBALS['pdo']?'ok':'unavailable']); }
-if($action==='markets'){ json_out(['ok'=>true,'items'=>['TW','US']]); }
-
-if($action==='quote_live'){
-  $sym = normalize_symbol($BODY['symbol']??'');
-  // 先 Python
-  if(exec_available()){
-    global $PYTHON,$PY_QUOTE;
-    [$ret,$d] = shell_json(escapeshellcmd("$PYTHON \"{$PY_QUOTE}\" ".escapeshellarg($sym)));
-    if(!empty($d) && empty($d['error'])) json_out(['ok'=>true]+$d);
-  }
-  // Yahoo 後備（永不 500）
-  $d = y_quote($sym);
-  if(empty($d['error'])) json_out(['ok'=>true]+$d);
-  json_out(['ok'=>false,'error'=>$d['error']??'quote_failed']); // 200
-}
-
-if($action==='info'){
-  $sym = normalize_symbol($BODY['symbol']??'');
-  $d = get_company_info_safe($sym);
-  if(!empty($d['error'])) json_out(['ok'=>false]+$d); // 200
-  json_out(['ok'=>true,'info'=>$d]);
-}
-
-if($action==='history'){
-  $sym = normalize_symbol($BODY['symbol']??''); $limit = max(60,(int)($BODY['limit']??240));
-  $rows=[];
-  if($pdo){
-    try{
-      $st=$pdo->prepare("SELECT date,open,high,low,close,volume FROM stock_data WHERE symbol IN (?, REPLACE(?, '.TW','')) ORDER BY date ASC");
-      $st->execute([$sym,$sym]); $rows=$st->fetchAll();
-      $rows = array_slice($rows, max(0,count($rows)-$limit));
-    }catch(Exception $e){ $rows=[]; }
-  }
-  if(!$rows){
-    [$rowsY,$err] = y_history_rows($sym,'10y','1d');
-    if(!$err && $rowsY){
-      $rows=$rowsY;
-      if($pdo){
-        $ins=$pdo->prepare("INSERT INTO stock_data(symbol,date,open,high,low,close,volume) VALUES(?,?,?,?,?,?,?)
-                            ON DUPLICATE KEY UPDATE open=VALUES(open), high=VALUES(high), low=VALUES(low), close=VALUES(close), volume=VALUES(volume)");
-        foreach($rowsY as $r){ $ins->execute([$sym,$r['date'],$r['open'],$r['high'],$r['low'],$r['close'],$r['volume']]); }
-      }
+// ===== 權限 =====
+function need_login() {
+    if (empty($_SESSION['user'])) {
+        echo json_encode(['ok'=>false, 'error'=>'not_logged_in'], JSON_UNESCAPED_UNICODE);
+        exit;
     }
-  }
-  json_out(['ok'=>true,'rows'=>rows_to_history($rows)]);
 }
 
-if($action==='update_today'){
-  $sym = normalize_symbol($BODY['symbol']??'');
-  $success=false; $note='';
-  if(exec_available()){
-    global $PYTHON,$PY_BACKFILL;
-    [$ret,$d] = shell_json(escapeshellcmd("$PYTHON \"{$PY_BACKFILL}\" ".escapeshellarg($sym)));
-    $success = !empty($d['success']); $note = $success ? '已更新(Py)':'嘗試更新(Py)';
-  }
-  if(!$success){
-    [$rows,$err] = y_history_rows($sym,'10y','1d');
-    if(!$err && $rows){
-      if($pdo){
-        $ins=$pdo->prepare("INSERT INTO stock_data(symbol,date,open,high,low,close,volume) VALUES(?,?,?,?,?,?,?)
-                            ON DUPLICATE KEY UPDATE open=VALUES(open), high=VALUES(high), low=VALUES(low), close=VALUES(close), volume=VALUES(volume)");
-        foreach($rows as $r){ $ins->execute([$sym,$r['date'],$r['open'],$r['high'],$r['low'],$r['close'],$r['volume']]); }
-      }
-      $success=true; $note='已更新(Yahoo)';
-    }else{ $note='更新失敗：'.($err?:'unknown'); }
-  }
-  // 最新一筆（DB 可用則取 DB；否則取剛抓的 rows 末筆）
-  $latest=null;
-  if($pdo){
-    $st=$pdo->prepare("SELECT date,open,high,low,close,volume FROM stock_data WHERE symbol IN (?, REPLACE(?, '.TW','')) ORDER BY date DESC LIMIT 1");
-    $st->execute([$sym,$sym]); $latest=$st->fetch();
-  }
-  if(!$latest){
-    [$rows,$err] = y_history_rows($sym,'1y','1d');
-    if(!$err && $rows) $latest = end($rows);
-  }
-  json_out(['ok'=>true,'success'=>$success,'note'=>$note,'latest'=>$latest]);
-}
+// ===== Python 執行 =====
+function run_py(string $script, array $args=[]): array {
+    $binCandidates = ['py -3', 'py', 'python', 'python3']; // Windows/XAMPP 常見
+    $scriptPath = __DIR__ . DIRECTORY_SEPARATOR . $script;
 
-if($action==='predict'){
-  $sym = normalize_symbol($BODY['symbol']??'');
-  if(exec_available()){
-    global $PYTHON,$PY_PREDICT;
-    [$ret,$d] = shell_json("$PYTHON \"{$PY_PREDICT}\" ".escapeshellarg($sym).' '.escapeshellarg(''));
-    if(!empty($d['success'])){
-      json_out(['ok'=>true,'method'=>$d['method'],'last_close'=>$d['last_close'],'last_close_date'=>$d['last_close_date'],'pred_close'=>$d['next_close_pred'],'proxy_used'=>$d['proxy_used']??null]);
+    foreach ($binCandidates as $bin) {
+        $cmd = $bin . ' ' . escapeshellarg($scriptPath);
+        foreach ($args as $a) $cmd .= ' ' . escapeshellarg((string)$a);
+        $cmd .= ' 2>&1';
+        $out = [];
+        $ret = 0;
+        @exec($cmd, $out, $ret);
+        if ($ret===0 && !empty($out)) {
+            $last = trim(end($out));
+            $json = json_decode($last, true);
+            if (is_array($json)) return $json;
+        }
     }
-  }
-  // 後備：線性回歸 60 根（DB / Yahoo）
-  $series=[];
-  if($pdo){
-    try{
-      $st=$pdo->prepare("SELECT date, close FROM stock_data WHERE symbol IN (?, REPLACE(?, '.TW','')) ORDER BY date DESC LIMIT 60");
-      $st->execute([$sym,$sym]); $rows=$st->fetchAll(); $series=array_reverse($rows);
-    }catch(Exception $e){}
-  }
-  if(!$series){
-    [$rows,$err] = y_history_rows($sym,'1y','1d');
-    if(!$err && $rows) $series = array_slice($rows,-60);
-  }
-  if(!$series) json_out(['ok'=>false,'error'=>'no_data_for_prediction']); // 200
-
-  $n=count($series); $sx=$sy=$sxx=$sxy=0.0;
-  for($i=1;$i<=$n;$i++){ $x=$i; $y=(float)$series[$i-1]['close']; $sx+=$x; $sy+=$y; $sxx+=$x*$x; $sxy+=$x*$y; }
-  $den = ($n*$sxx - $sx*$sx) ?: 1;
-  $b = ($n*$sxy - $sx*$sy) / $den; $a = ($sy - $b*$sx) / $n;
-  $pred = $a + $b*($n+1);
-  json_out(['ok'=>true,'method'=>'PHP_LR(60)','last_close'=>(float)$series[$n-1]['close'],'last_close_date'=>$series[$n-1]['date'],'pred_close'=>round($pred,4)]);
+    return ['error'=>'python_exec_failed','script'=>$script,'args'=>$args,'raw'=>($out ?? [])];
 }
 
-// 其餘需要 DB 的功能：若 DB 不可用就回空而不是 500
-if($action==='rankings' || $action==='screen' || $action==='portfolio_backtest'){
-  if(!$pdo) json_out(['ok'=>false,'error'=>'db_unavailable']);
-}
+function ok($data){ echo json_encode(['ok'=>true]+$data, JSON_UNESCAPED_UNICODE); exit; }
+function err($msg,$extra=[]){ echo json_encode(['ok'=>false,'error'=>$msg]+$extra, JSON_UNESCAPED_UNICODE); exit; }
 
-// === 預測「隔日收盤價」===
-if ($action === 'predict') {
-    $input  = json_decode(file_get_contents('php://input'), true);
-    $symbol = trim($input['symbol'] ?? '');
-    if ($symbol === '') { echo json_encode(['ok'=>false,'error'=>'no_symbol']); exit; }
-
-    $py  = 'python'; 
-    $cmd = escapeshellcmd($py) . ' ' .
-           escapeshellarg(__DIR__ . DIRECTORY_SEPARATOR . 'stock_predictor.py') . ' ' .
-           escapeshellarg($symbol);
-
-    $json = shell_exec($cmd);
-    $out  = @json_decode($json, true);
-
-    if (isset($out['success']) && $out['success']) {
-        echo json_encode([
-          'ok'=>true,
-          'method' => $out['method'] ?? 'close_model',
-          'last_close' => $out['last_close'] ?? null,
-          'last_close_date' => $out['last_close_date'] ?? null,
-          'pred_close' => $out['next_close_pred'] ?? null,
-          'proxy' => $out['proxy_used'] ?? null,
-          'components' => $out['components'] ?? null
-        ]);
-    } else {
-        echo json_encode(['ok'=>false,'error'=>$out['error'] ?? 'predict_failed','raw'=>$json]);
+function normalize_symbol($s){
+    $x = strtoupper(trim((string)$s));
+    if (preg_match('/^\d{4}(\.TW|\.TWO)?$/', $x)) {
+        return preg_match('/\.TW|\.TWO$/', $x) ? $x : ($x.'.TW');
     }
-    exit;
+    return str_replace('.', '-', $x);
 }
-// == 目標價預測 ==
+
+// 路由與別名
+$action = $_GET['action'] ?? $_POST['action'] ?? '';
+$aliases = [
+  'quote'=>'quote_live','company'=>'info','update_history'=>'update_today',
+  'predict'=>'predict_next','next'=>'predict_next','target'=>'predict_target',
+  'signal_suggest'=>'signal','signal_eval'=>'signal','risk_eval'=>'risk',
+  'health'=>'diag'
+];
+if (isset($aliases[$action])) $action = $aliases[$action];
+
+// 0) 健康檢查
+if ($action === 'diag') {
+    ok(['php'=>'ok','session'=>!empty($_SESSION['user']),'time'=>date('c')]);
+}
+
+// 1) 即時報價
+if ($action === 'quote_live') {
+    need_login();
+    $sym = normalize_symbol($_POST['symbol'] ?? $_GET['symbol'] ?? '');
+    if (!$sym) err('no_symbol');
+    $r = run_py('quote_live.py', [$sym]);
+    if (!empty($r['error'])) err('quote_failed',['raw'=>$r]);
+    ok(['data'=>$r]);
+}
+
+// 2) 公司基本資料
+if ($action === 'info') {
+    need_login();
+    $sym = normalize_symbol($_POST['symbol'] ?? $_GET['symbol'] ?? '');
+    if (!$sym) err('no_symbol');
+    $r = run_py('company_info.py', [$sym]);
+    if (!empty($r['error'])) err('info_failed',['raw'=>$r]);
+    ok(['data'=>$r]);
+}
+
+// 2.5) 歷史K線（最近400根，升冪）
+if ($action === 'history') {
+    need_login();
+    $sym = normalize_symbol($_POST['symbol'] ?? $_GET['symbol'] ?? '');
+    if (!$sym) err('no_symbol');
+
+    try {
+        $pdo = new PDO(
+            'mysql:host=127.0.0.1;dbname=stock_db;charset=utf8mb4',
+            'stockapp','920430',
+            [
+                PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC,
+            ]
+        );
+        $st = $pdo->prepare(
+            "SELECT date, open, high, low, close, volume
+             FROM stock_data
+             WHERE symbol=? AND close IS NOT NULL
+             ORDER BY date DESC
+             LIMIT 400"
+        );
+        $st->execute([$sym]);
+        $rows = $st->fetchAll();
+
+        // 轉成升冪
+        $rows = array_reverse($rows);
+
+        // 組成前端需要的 ohlc 陣列（純 PHP）
+        $ohlc = array_map(function(array $r){
+            return [
+                'date'   => $r['date'],
+                'open'   => isset($r['open'])   ? (float)$r['open']   : null,
+                'high'   => isset($r['high'])   ? (float)$r['high']   : null,
+                'low'    => isset($r['low'])    ? (float)$r['low']    : null,
+                'close'  => isset($r['close'])  ? (float)$r['close']  : null,
+                'volume' => isset($r['volume']) ? (int)$r['volume']   : null,
+            ];
+        }, $rows);
+
+        ok(['data'=>['ohlc'=>$ohlc]]);
+    } catch (Throwable $e) {
+        err('history_failed', ['msg'=>$e->getMessage()]);
+    }
+}
+
+// 3) 更新至最新日K
+if ($action === 'update_today') {
+    need_login();
+    $sym = normalize_symbol($_POST['symbol'] ?? $_GET['symbol'] ?? '');
+    if (!$sym) err('no_symbol');
+    $r = run_py('backfill_one.py', [$sym]);
+    if (!empty($r['success'])) ok(['updated'=>$r]);
+    err('update_failed', ['raw'=>$r]);
+}
+
+// 4) 預測（明日）
+if ($action === 'predict_next') {
+    need_login();
+    $sym = normalize_symbol($_POST['symbol'] ?? $_GET['symbol'] ?? '');
+    $proxy = $_POST['proxy'] ?? $_GET['proxy'] ?? '';
+    if (!$sym) err('no_symbol');
+    $r = run_py('stock_predictor.py', [$sym, $proxy]);
+    if (!empty($r['error'])) err('predict_failed',['raw'=>$r]);
+    ok(['data'=>$r]);
+}
+
+// 5) 目標價
 if ($action === 'predict_target') {
-    $input = json_decode(file_get_contents('php://input'), true);
-    $symbol  = trim($input['symbol'] ?? '');
-    $horizon = intval($input['horizon'] ?? 20);  // 預設 20 交易日
-
-    if ($symbol === '') {
-        echo json_encode(['ok'=>false,'error'=>'no_symbol']); exit;
-    }
-
-    // Windows XAMPP：請確認 python 在 PATH；必要時改成 python.exe 的絕對路徑
-    $py = 'python';
-    $script = __DIR__ . DIRECTORY_SEPARATOR . 'stock_target_predictor.py';
-    $cmd = escapeshellcmd($py) . ' ' . escapeshellarg($script) . ' ' . escapeshellarg($symbol) . ' ' . escapeshellarg($horizon);
-
-    $json = shell_exec($cmd);
-    $out  = @json_decode($json, true);
-
-    if (isset($out['success']) && $out['success']) {
-        echo json_encode([
-            'ok' => true,
-            'method'          => $out['method'] ?? 'target_model',
-            'last_close'      => $out['last_close'] ?? null,
-            'last_close_date' => $out['last_close_date'] ?? null,
-            'horizon_days'    => $out['horizon_days'] ?? $horizon,
-            'tech_target'     => $out['tech_target'] ?? null,
-            'val_target'      => $out['val_target'] ?? null,
-            'suggested_target'=> $out['suggested_target'] ?? null,
-            'components'      => $out['components'] ?? null
-        ]);
-    } else {
-        echo json_encode(['ok'=>false,'error'=>$out['error'] ?? 'predict_target_failed','raw'=>$json]);
-
-    }
-    exit;
+    need_login();
+    $sym = normalize_symbol($_POST['symbol'] ?? $_GET['symbol'] ?? '');
+    $h   = intval($_POST['horizon'] ?? $_GET['horizon'] ?? 40);
+    if (!$sym) err('no_symbol');
+    $r = run_py('stock_target_predictor.py', [$sym, $h]);
+    if (!empty($r['error'])) err('predict_target_failed',['raw'=>$r]);
+    ok(['data'=>$r]);
 }
 
-json_out(['ok'=>false,'error'=>'unknown_action']);
+// 6) 近日操作建議
+if ($action === 'signal') {
+    need_login();
+    $sym = normalize_symbol($_POST['symbol'] ?? $_GET['symbol'] ?? '');
+    if (!$sym) err('no_symbol');
+    $r = run_py('trade_signal.py', [$sym]);
+    if (!empty($r['error'])) err('signal_failed',['raw'=>$r]);
+    ok(['data'=>$r]);
+}
+
+// 7) 風險評估
+if ($action === 'risk') {
+    need_login();
+    $sym = normalize_symbol($_POST['symbol'] ?? $_GET['symbol'] ?? '');
+    $h   = intval($_POST['horizon'] ?? $_GET['horizon'] ?? 20);
+    if (!$sym) err('no_symbol');
+    $r = run_py('risk_engine.py', [$sym, $h]);
+    if (!empty($r['error'])) err('predict_risk_failed',['raw'=>$r]);
+    ok(['data'=>$r]);
+}
+
+err('unknown_action');

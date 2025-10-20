@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
+import os, sys, json
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+os.environ["PYTHONIOENCODING"] = "utf-8"
 
 import argparse, time
 from datetime import date, timedelta, datetime
@@ -8,7 +13,7 @@ import pandas as pd, requests, yfinance as yf
 from bs4 import BeautifulSoup
 import mysql.connector
 
-DB_CONFIG = dict(host='localhost', user='root', password='', database='stock_db')
+DB_CONFIG =  dict(host='127.0.0.1', user='stockapp', password='920430', database='stock_db')
 
 def today_str(): return date.today().isoformat()
 def tomorrow_str(): return (date.today() + timedelta(days=1)).isoformat()
@@ -34,7 +39,13 @@ def normalize_us_ticker(t: str) -> str:
 
 def normalize_symbol(raw: str) -> str:
     s = raw.strip().upper()
-    if s.isdigit() and len(s) == 4: return f"{s}.TW"
+    # 處理 4 碼台股代號
+    if s.isdigit() and len(s) == 4: 
+        return f"{s}.TW"
+    # 如果已經是 .TW 或 .TWO，直接回傳
+    if s.endswith('.TW') or s.endswith('.TWO'):
+        return s
+    # 否則，才當作美股處理 (e.g., BRK.B -> BRK-B)
     return normalize_us_ticker(s)
 
 def connect_db(): return mysql.connector.connect(**DB_CONFIG)

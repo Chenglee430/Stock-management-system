@@ -1,246 +1,174 @@
-Stock-management-system
-
-
+# 📈 Stock-management-system
 智慧股票分析、預測與風險評估平台（台股 / 美股）
 
-PHP + MySQL + Python + yfinance + Plotly.js + TailwindCSS
-即時報價｜公司資訊｜K 線（日/週/月）｜MA / MACD / RSI / BB｜AI 預測｜目標價｜操作建議｜風險評估｜登入/註冊
+> PHP + MySQL + Python + yfinance + Plotly.js + TailwindCSS  
+> 即時報價｜公司資訊｜K 線（日/週/月）｜MA / MACD / RSI / BB｜AI 預測｜目標價｜操作建議｜風險評估｜登入/註冊
 
-目錄
+---
 
-功能特色
+## 📌 功能特色
 
-系統架構
+- **即時報價**：最新價、漲跌幅、成交量，自動補最近日線
+- **公司基本資料**：公司名稱、產業、市值、PE、本益比、殖利率
+- **K 線圖**：日/週/月顆粒度切換、1M~ALL 區間、可縮放/拖曳
+- **技術指標**：MA(5/20/60)、MACD(12/26/9)、RSI(14)、布林通道(20,2)
+- **互動 HUD**：滑鼠移動即時顯示（日期/收盤/漲跌%/量/RSI/MACD）
+- **AI 模型**：明日收盤預測、目標價、操作建議、風險評估（含信心值）
+- **主題**：深色 / 淺色切換
+- **帳號系統**：註冊、登入、忘記密碼（含 4 碼驗證碼）
 
-檔案一覽（15 個）
+---
 
-安裝與執行
+## 🧱 系統架構
 
-資料庫結構
-
-後端 API 一覽
-
-Python 模組說明
-
-quote_live.py（即時報價與OHLC）
-
-其他模型腳本
-
-前端 UI 與互動
-
-排程建議
-
-授權
-
-功能特色
-
-即時報價：最新價、漲跌幅、成交量；不足時自動以最近日線補值
-
-公司基本資料：公司名稱、產業、市值、PE、殖利率等
-
-K 線圖：日/週/月顆粒度切換；1M/3M/6M/1Y/YTD/ALL 區間；可縮放/拖曳
-
-技術指標：MA(5/20/60)、MACD(12/26/9)、RSI(14)、布林通道(20,2)
-
-互動 HUD：滑鼠移動顯示日期/收盤/漲跌%/量/RSI/MACD（TradingView 風格）
-
-AI：明日收盤預測、目標價預估、操作建議、風險評估（含信心估計）
-
-主題：深色 / 淺色切換
-
-帳號系統：註冊、登入、忘記密碼（驗證碼）
-
-系統架構
+```plaintext
 Frontend (index.html)
- ├─ Plotly.js：互動 K 線、指標與 HUD
+ ├─ Plotly.js：互動 K 線與指標
  └─ TailwindCSS：樣式與 RWD
 
 Backend (PHP)
  ├─ api.php        ← 統一 API 入口（quote/info/history/update/predict/...）
  ├─ auth.php       ← 註冊、登入、忘記密碼
- ├─ admin.php      ← 管理端
+ ├─ admin.php      ← 管理介面
  └─ config.php     ← DB 設定
 
-Python (ML / Data)
+Python (AI / Data)
  ├─ quote_live.py               ← 即時報價 + 近一年 OHLC
  ├─ company_info.py             ← 公司基本資料
- ├─ fetch_stock.py / stock_scraper.py / backfill_one.py ← 歷史資料抓取與回填
+ ├─ fetch_stock.py              ← 歷史資料擷取
+ ├─ stock_scraper.py            ← 自動更新每日行情
+ ├─ backfill_one.py             ← 批次補資料
  ├─ stock_predictor.py          ← 明日收盤預測
  ├─ stock_target_predictor.py   ← 目標價預測
  ├─ trade_signal.py             ← 操作建議
  └─ risk_engine.py              ← 風險評估
 
-檔案一覽（15 個）
 
-index.html（前端頁面，含 K 線、指標、HUD、各功能按鈕）
+📁 檔案一覽（15 個）
+類別	檔名	功能摘要
+HTML	index.html	前端頁面，含 K 線、預測、建議、風險顯示
+PHP	api.php	統一 API 接口，與 Python 模組整合
+PHP	auth.php	註冊 / 登入 / 忘記密碼
+PHP	admin.php	管理員頁面
+PHP	config.php	MySQL 連線設定
+SQL	db_init.sql	建立資料表（users, stock_data, logs）
+Python	quote_live.py	取得最新報價與一年 OHLC（詳下）
+Python	company_info.py	抓公司資訊與產業分類
+Python	fetch_stock.py	下載股價資料
+Python	stock_scraper.py	自動更新行情（排程使用）
+Python	backfill_one.py	批次補資料
+Python	stock_predictor.py	AI 模型預測明日收盤價
+Python	stock_target_predictor.py	預測目標價（混合模型）
+Python	trade_signal.py	產生操作建議
+Python	risk_engine.py	風險評估與信心指標
 
-api.php（主要 API 路由與 Python 執行器）
-
-auth.php（註冊/登入/忘記密碼）
-
-admin.php（管理介面）
-
-config.php（DB 連線設定）
-
-db_init.sql（資料表 schema）
-
-quote_live.py（即時報價 + 近一年 OHLC，詳見下節）
-
-company_info.py
-
-fetch_stock.py
-
-stock_scraper.py
-
-backfill_one.py
-
-stock_predictor.py
-
-stock_target_predictor.py
-
-trade_signal.py
-
-risk_engine.py
-
-安裝與執行
-
-環境
-
+1️⃣ 環境
 Windows + XAMPP（Apache + PHP + MySQL）
-
 Python 3.10+
 
-放置
-
+2️⃣ 專案目錄
 C:\xampp\htdocs\stock_project\
 
+3️⃣ 安裝 Python 套件
+pip install yfinance pandas numpy scikit-learn mysql-connector-python
 
-安裝 Python 套件
+4️⃣ 建立資料庫
+phpMyAdmin → 匯入
 
-py -3 -m pip install --upgrade pip
-py -3 -m pip install yfinance pandas numpy scikit-learn mysql-connector-python
+5️⃣ 設定資料庫
+// config.php
+$DB_HOST 
+$DB_USER 
+$DB_PASS 
+$DB_NAME 
 
+6️⃣ 啟動 Apache + MySQL
 
-建立資料庫
+💡 quote_live.py（即時報價與 OHLC）
 
-phpMyAdmin 匯入 db_init.sql
+用途
+提供前端即時報價、漲跌幅與過去一年日線，用於繪製 K 線與技術分析。
+______________________________________________________________
+流程
+使用 yfinance.Ticker(symbol) 抓取 fast_info。
+若無法取得 → 自動 fallback 至 history(period='5d')。
+回傳 ohlc[] 陣列（最多 1 年資料）。
+支援台股 .TW、美股 .US 自動判別。
+______________________________________________________________
 
-DB 設定
+其他 Python 模組摘要
+______________________________________________________________
+1️⃣ stock_predictor.py
+明日收盤價預測（RandomForest + Linear + Ridge Ensemble）
+回傳 next_close_pred 與模型信心。
 
-編輯 config.php（host/user/pass/db）
+2️⃣stock_target_predictor.py
+長期目標價預測（技術面 + 基本面混合）
+回傳 target_price、confidence。
 
-啟動服務
+3️⃣trade_signal.py
+根據 MA / MACD / RSI / 量能 → 自動生成操作建議。
+回傳 buy / hold / watch / stop_loss。
 
-http://localhost/stock_project/index.html
-
-
-首次使用建議
-
-登入後先按「更新到最新日K」回填資料 → K 線出現後再跑「預測 / 目標價 / 建議 / 風險」
-
-資料庫結構
-
-主要表（示意）：
-
-users：帳號、密碼雜湊、建立時間等
-
-stock_data：symbol, date, open, high, low, close, volume
-
-user_search_log：查詢紀錄（可擴充）
-
-實際 schema 以 db_init.sql 為準。
-
-後端 API 一覽
-
-皆以 POST api.php + action 參數呼叫（auth.php 為登入相關）
-
-Action	說明	主要參數	回傳要點
-diag	健康檢查	-	ok, time
-quote_live	即時報價 + 近一年 OHLC	symbol	last, prevClose, open, high, low, volume, changePct, ohlc[]
-info	公司基本資料	symbol	company_name, industry, market_cap, pe, dividend_*
-history	從 DB 取近 400 根（日線）	symbol	ohlc[]
-update_today	回填至最新	symbol	updated
-predict_next	明日收盤預測	symbol	next_close_pred, components{rf,lr,ridge}...
-predict_target	目標價預估	symbol, horizon	suggested_target / tech_target / val_target ...
-signal	操作建議	symbol	bias, setup, summary, timeframe_days ...
-risk	風險評估	symbol, horizon	risk.var95_daily, risk.atr14, plan.kelly_fraction_cap20pct ...
-Python 模組說明
-quote_live.py（即時報價與OHLC）
-
-用途：回傳「最新價/漲跌幅/量」與「近一年日線 OHLC」給前端 K 線即時繪圖
-
-台/美股自動正規化：2330 自動補成 2330.TW
-
-資料策略：
-
-先用 Ticker.fast_info 取 lastPrice/previousClose/...
-
-取不到就以 history(5d,1d) 補：last = 最新 close、prev = 前一日 close
-
-另取 history(1y,1d) 組 ohlc[]（最多 ~220 根）
-
-典型輸出
-
-{
-  "symbol": "2330.TW",
-  "last": 638.0,
-  "prevClose": 632.0,
-  "open": 635.0,
-  "high": 641.0,
-  "low":  631.0,
-  "volume": 31234567,
-  "changePct": 0.95,
-  "ohlc": [{"date":"2025-09-01","open":...,"high":...,"low":...,"close":...,"volume":...}, ...]
-}
+4️⃣risk_engine.py
+計算波動率、VaR、RSI/ATR、漲跌異常等風險分數
 
 
-實作重點：fast_info → history 回補、ohlc 結構、一年日線限制與台股代號處理。
-
-quote_live
-
-相依套件
-
-yfinance, pandas, numpy（間接）, warnings
-
-其他模型腳本
-
-stock_predictor.py：明日收盤價預測（多模型組合），前端對應欄位：next_close_pred；若需要建議與信心，前端已提供推導邏輯（以變異係數/模型一致性估計）。
-
-stock_target_predictor.py：目標價預估；常見鍵名：suggested_target / tech_target / val_target。
-
-trade_signal.py：操作建議；典型鍵名：bias（偏多/偏空/觀望）、setup（型態）、summary、timeframe_days。
-
-risk_engine.py：風險評估；典型鍵名：risk.var95_daily（VaR%）、risk.atr14、plan.kelly_fraction_cap20pct（Kelly 倉位上限%）。
-
-前端已做 鍵名容錯與顯示映射，避免欄位不同導致空白。
-
-前端 UI 與互動
-
-K 線顆粒度：日 / 週 / 月（前端重採樣）
-
-時間區間：1M / 3M / 6M / 1Y / YTD / ALL
-
-指標：MA5/20/60、BB(20,2)、RSI(14)、MACD(12,26,9)
-
-主題：深 / 淺
-
-互動：拖曳 / 滾輪縮放 / 十字 spikeline / HUD（右上角顯示游標對應數值）
-
-排程建議
-
-Windows 任務排程器（Task Scheduler）：
-
-py -3 "C:\xampp\htdocs\stock_project\stock_scraper.py"
+🧭 API 一覽（api.php）
+Action	                    說明	                      回傳內容
+_________________________________________________________________________
+quote_live          	即時報價 + OHLC	            最新價、漲跌幅、ohlc[]
+info	                公司資訊	                   公司名稱、市值、PE、殖利率
+history	             歷史 K 線	                 過去 400 根日線
+update_today	        更新當日行情	               更新筆數
+predict_next	        明日預測	                   收盤價預測
+predict_target	      目標價預測	                 目標價、信心值
+signal	              操作建議	                   建議文字、bias、信心
+risk	                風險評估	                   數值化風險與建議
 
 
-台股：每日收盤後 18:30
+📊 前端互動特色
 
-美股：每日早上 09:00（台灣時間）
+日 / 週 / 月 K 線切換（自動重採樣）
+MA / MACD / RSI / BB 開關
+1M / 3M / 6M / 1Y / YTD / ALL 區間
+深色 / 淺色主題切換
+滑鼠 hover 顯示即時 HUD（TradingView 風格）
+支援拖曳 / 滾輪縮放（Plotly.scrollZoom）
 
-授權
 
-License：MIT
+🔄 自動化排程
 
-作者：李承勳 (Li Cheng-Hsun)
+Windows 任務排程器：
+python "C:\xampp\htdocs\stock_project\stock_scraper.py"
+
+台股：每日 18:30 更新
+美股：每日早上 9:00 更新
+
+
+🧠 系統流程圖
+使用者輸入代號 → api.php
+   ↓
+呼叫 Python：
+   ↳ quote_live.py      ← 即時報價 / OHLC
+   ↳ company_info.py    ← 公司資訊
+   ↳ stock_predictor.py ← 收盤預測
+   ↳ stock_target_predictor.py ← 目標價
+   ↳ trade_signal.py    ← 操作建議
+   ↳ risk_engine.py     ← 風險評估
+   ↓
+整合 JSON → 前端 Plotly 繪圖顯示
+
+
+
+🧰 授權與版本
+
+License: MIT
+
+作者：李承勳 (Li Cheng-Syun)
+
+專案名稱：Stock-management-system
+
+開發環境：Windows + XAMPP + Python 3.10
 
 最後更新：2025-10
